@@ -83,4 +83,114 @@ st.header("1. Traveler & Trip Basics")
 traveler = st.text_input("Traveler Name (optional):", "")
 num_travelers = st.number_input("Number of Travelers", min_value=1, value=1)
 
-origin = st.sele
+origin = st.selectbox(
+    "Departure Airport",
+    ["BOS", "MHT"],
+    index=0
+)
+destination = "TPA"   # Fixed
+
+depart_date = st.date_input("Departure Date")
+return_date = st.date_input("Return Date")
+
+trip_nights = (return_date - depart_date).days
+if trip_nights < 1:
+    st.warning("Return date must be after departure date.")
+    st.stop()
+
+
+# -------------------------------------------------------------------
+# 5. CAR SERVICE (AXIS COACH)
+# -------------------------------------------------------------------
+st.header("2. Car Service (Axis Coach)")
+
+car_service_rate = st.number_input("Car Service One-Way Cost", min_value=0.0, value=160.0)
+car_roundtrip_cost = car_service_rate * 2
+
+
+# -------------------------------------------------------------------
+# 6. FLIGHTS
+# -------------------------------------------------------------------
+st.header("3. Flights (JetBlue)")
+
+flight_pricing_mode = st.radio(
+    "How should we calculate flights?",
+    ["Use Amadeus average (JetBlue)", "Enter manually"],
+)
+
+if flight_pricing_mode == "Use Amadeus average (JetBlue)":
+    st.info("Will query Amadeus for average fare…")
+
+    avg_fare = estimate_jetblue_price(origin, destination, depart_date, return_date)
+
+    if avg_fare:
+        st.success(f"Estimated JetBlue average roundtrip fare: **${avg_fare}**")
+        flight_cost_per_person = avg_fare
+    else:
+        st.error("Unable to retrieve JetBlue pricing. Please enter flight cost manually.")
+        flight_cost_per_person = st.number_input("Manual Flight Cost Per Person", min_value=0.0, value=0.0)
+else:
+    flight_cost_per_person = st.number_input("Manual Flight Cost Per Person", min_value=0.0, value=0.0)
+
+total_flight_cost = flight_cost_per_person * num_travelers
+
+
+# -------------------------------------------------------------------
+# 7. HOTEL (MARRIOTT)
+# -------------------------------------------------------------------
+st.header("4. Hotel (Marriott Preferred)")
+
+hotel_rate = st.number_input("Marriott Nightly Rate ($)", min_value=0.0, value=180.0)
+hotel_cost = hotel_rate * trip_nights * num_travelers  # each traveler gets their own room
+
+
+# -------------------------------------------------------------------
+# 8. RENTAL CAR (HERTZ)
+# -------------------------------------------------------------------
+st.header("5. Hertz Rental Car")
+
+rental_rate = st.number_input("Hertz Daily Rate", min_value=0.0, value=55.0)
+rental_days = trip_nights
+rental_cost = rental_rate * rental_days
+
+
+# -------------------------------------------------------------------
+# 9. ADD-INS
+# -------------------------------------------------------------------
+st.header("6. Additional Expenses")
+
+misc_cost = st.number_input("Miscellaneous Add-ins ($)", min_value=0.0, value=0.0)
+per_diem = st.number_input("Per Diem Per Day ($)", min_value=0.0, value=0.0)
+per_diem_total = per_diem * num_travelers * trip_nights
+
+
+# -------------------------------------------------------------------
+# 10. CALCULATE TOTAL
+# -------------------------------------------------------------------
+st.header("7. Final Calculation")
+
+if st.button("💰 Calculate Trip Cost"):
+    total_cost = (
+        car_roundtrip_cost
+        + total_flight_cost
+        + hotel_cost
+        + rental_cost
+        + misc_cost
+        + per_diem_total
+    )
+
+    st.subheader("Trip Summary")
+    st.write(f"**Traveler:** {traveler if traveler else 'N/A'}")
+    st.write(f"**Travelers:** {num_travelers}")
+    st.write(f"**Travel Dates:** {depart_date} → {return_date}")
+    st.write(f"**Trip Nights:** {trip_nights}")
+
+    st.subheader("Cost Breakdown")
+    st.write(f"Car Service (RT): **${car_roundtrip_cost}**")
+    st.write(f"Flights Total: **${total_flight_cost}**")
+    st.write(f"Hotel Total: **${hotel_cost}**")
+    st.write(f"Hertz Total: **${rental_cost}**")
+    st.write(f"Misc Add-ins: **${misc_cost}**")
+    st.write(f"Per Diem Total: **${per_diem_total}**")
+
+    st.success(f"### **Grand Total: ${total_cost:,.2f}**")
