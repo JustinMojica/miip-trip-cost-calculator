@@ -38,10 +38,12 @@ amadeus = get_amadeus_client()
 # -------------------------------------------------------------------
 def estimate_jetblue_price(origin: str, destination: str, depart: date, return_date: date) -> Optional[float]:
     """
-    Query Amadeus for average JetBlue roundtrip fare.
-    If unavailable, return None and the user can enter manually.
+    Query Amadeus for average roundtrip fare.
+    Shows helpful messages if something goes wrong.
     """
+    # 1. Did we even create the Amadeus client?
     if not amadeus:
+        st.error("Amadeus client not initialized – check API keys in Streamlit secrets.")
         return None
 
     try:
@@ -51,28 +53,35 @@ def estimate_jetblue_price(origin: str, destination: str, depart: date, return_d
             departureDate=depart.isoformat(),
             returnDate=return_date.isoformat(),
             adults=1,
-            nonStop=False
+            nonStop=False,
         )
 
         offers = response.data
+
+        # 2. Did Amadeus return any offers at all?
         if not offers:
+            st.warning("Amadeus returned no flight offers for this route and dates.")
             return None
 
         total_prices = []
         for offer in offers:
             try:
-                price = float(offer["price"]["grandTotal"])
-                total_prices.append(price)
+                total_prices.append(float(offer["price"]["grandTotal"]))
             except Exception:
                 continue
 
+        # 3. Offers but no usable price field
         if not total_prices:
+            st.warning("Amadeus returned offers but no usable prices.")
             return None
 
         return round(sum(total_prices) / len(total_prices), 2)
 
-    except ResponseError:
+    except ResponseError as e:
+        # 4. API returned an error (bad key, quota, etc)
+        st.error(f"Amadeus API error: {e}")
         return None
+
 
 
 # -------------------------------------------------------------------
@@ -194,3 +203,4 @@ if st.button("💰 Calculate Trip Cost"):
     st.write(f"Per Diem Total: **${per_diem_total}**")
 
     st.success(f"### **Grand Total: ${total_cost:,.2f}**")
+
