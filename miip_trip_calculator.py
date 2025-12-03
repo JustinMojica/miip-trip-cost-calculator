@@ -4,6 +4,3 @@ from typing import Optional
 
 import streamlit as st
 from amadeus import Client, ResponseError
-...
-
-
