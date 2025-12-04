@@ -6,6 +6,47 @@ import requests
 import streamlit as st
 from amadeus import Client, ResponseError
 
+# --- Amadeus debug connection test ---
+
+def amadeus_debug_test():
+    """
+    Quick debug helper to verify that Streamlit secrets match what Amadeus expects.
+    Shows short hashes of the keys (not the real values) and does a tiny test call.
+    """
+    import hashlib
+
+    try:
+        cfg = st.secrets["amadeus"]
+    except Exception as exc:
+        st.error(f"[DEBUG] Cannot read [amadeus] from secrets: {exc}")
+        return
+
+    cid = cfg.get("client_id", "")
+    csec = cfg.get("client_secret", "")
+    host = cfg.get("hostname", "")
+
+    # Show fingerprints so we know secrets are actually loaded
+    st.write("**[DEBUG] Hostname:**", repr(host))
+    st.write("**[DEBUG] client_id hash:**", hashlib.sha256(cid.encode()).hexdigest()[:10])
+    st.write("**[DEBUG] client_secret hash:**", hashlib.sha256(csec.encode()).hexdigest()[:10])
+
+    try:
+        client = Client(
+            client_id=cid,
+            client_secret=csec,
+            hostname=host or "production",
+        )
+        # very cheap test call
+        resp = client.reference_data.locations.get(
+            keyword="TPA", subType="AIRPORT", page={"limit": 1}
+        )
+        st.success("[DEBUG] Amadeus test OK – credentials accepted.")
+    except ResponseError as e:
+        st.error(f"[DEBUG] Amadeus test failed: [{e.response.status_code}] {e}")
+    except Exception as e:
+        st.error(f"[DEBUG] Unexpected error: {e}")
+
+
 
 # =========================
 # 1. HELPERS & INITIAL SETUP
@@ -304,6 +345,10 @@ def fetch_gsa_meals_per_diem(
 
 st.title("MIIP Trip Cost Calculator")
 st.caption(
+    with st.expander("Amadeus debug (temporary)", expanded=True):
+    if st.button("Run Amadeus debug test"):
+        amadeus_debug_test()
+
     "Automatically estimate flight, hotel, rental car, and GSA meals (per diem) "
     "for audit trips."
 )
@@ -526,3 +571,4 @@ if st.button("Calculate trip cost"):
         st.write(f"- Number of travelers: **{num_travelers}**")
         st.write(f"- Trip length: **{days} days / {nights} nights**")
         st.write(f"- Approximate cost **per traveler**: ${total_trip_cost / num_travelers:,.2f}")
+
