@@ -24,8 +24,8 @@ def get_amadeus_client():
     """Initialize Amadeus only if secrets are set."""
     try:
         return Client(
-            client_id=st.secrets["AMADEUS_CLIENT_ID"],
-            client_secret=st.secrets["AMADEUS_CLIENT_SECRET"]
+            client_id=st.secrets["4iGEIhJyBuLwpkk3YV6WUvoQNL0fMHWG"],
+            client_secret=st.secrets["xaE0EZasXwY6KNBD"]
         )
     except Exception:
         return None
@@ -203,4 +203,5 @@ if st.button("💰 Calculate Trip Cost"):
     st.write(f"Per Diem Total: **${per_diem_total}**")
 
     st.success(f"### **Grand Total: ${total_cost:,.2f}**")
+
 
