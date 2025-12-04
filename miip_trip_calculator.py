@@ -1,5 +1,4 @@
 import math
-import os
 import re
 from datetime import date
 from typing import Optional, List
@@ -10,7 +9,7 @@ from amadeus import Client, ResponseError
 
 
 # -----------------------------------------------------------------------------
-# 1. READ SECRETS (these come from Streamlit "Secrets" that you already set)
+# 1. READ SECRETS (these come from Streamlit "Secrets")
 # -----------------------------------------------------------------------------
 
 AMADEUS_CLIENT_ID = st.secrets["amadeus"]["client_id"]
@@ -106,7 +105,7 @@ def get_amadeus_average_hotel_rate(
     nights: int,
 ) -> Optional[float]:
     """
-    Very simple Amadeus hotel search:
+    Simple Amadeus hotel search:
     - Uses destination airport code as the cityCode.
     - Filters hotels whose name contains the preferred brand string.
     - Computes average nightly rate across returned offers.
@@ -134,8 +133,6 @@ def get_amadeus_average_hotel_rate(
             for offer in hotel.get("offers", []):
                 try:
                     total_price = float(offer["price"]["total"])
-                    # Rough per-night: divide by length of stay specified in offer
-                    # For simplicity, assume offer is for "nights" nights
                     nightly_rate = total_price / max(nights, 1)
                     nightly_rates.append(nightly_rate)
                 except Exception:
@@ -173,27 +170,8 @@ def get_gsa_meals_rate_from_zip(zip_code: str, year: int) -> Optional[float]:
     Call GSA Per Diem API to get M&IE (Meals & Incidental Expenses) rate
     for a given ZIP and year.
 
-    We use the documented endpoint:
+    Endpoint pattern:
         /v2/rates/zip/{zip}/year/{year}?api_key=...
-
-    Example response (trimmed) looks like: 
-        {
-          "rates": [
-            {
-              "rate": [
-                {
-                  "months": {...},
-                  "meals": 64,
-                  "zip": "64110",
-                  "city": "Kansas City",
-                  ...
-                }
-              ],
-              "state": "MO",
-              "year": 2022
-            }
-          ]
-        }
 
     We pull rates[0].rate[0].meals which is a daily M&IE amount in USD.
     """
@@ -252,6 +230,47 @@ def airline_name_to_code(name: str) -> Optional[str]:
 
 
 # -----------------------------------------------------------------------------
+# HERTZ RENTAL ESTIMATE (HIDDEN MEMBERSHIP DISCOUNT)
+# -----------------------------------------------------------------------------
+
+
+def get_estimated_hertz_membership_daily_rate(destination_airport: str) -> float:
+    """
+    Estimate Hertz SUV daily rate for MIIP, with membership discount applied.
+    Auditors never see the discount %, only the final daily rate.
+
+    1) Choose a base 'public' SUV rate by airport.
+    2) Apply a hidden membership discount (e.g. 20% off).
+    3) Return the discounted daily rate.
+    """
+    # Base "public" SUV daily rates by airport (before membership)
+    base_rates = {
+        "BOS": 80.0,
+        "MHT": 70.0,
+        "TPA": 65.0,
+        # Add more airports as you learn real averages:
+        # "MCO": 65.0,
+        # "FLL": 65.0,
+        # "ATL": 70.0,
+        # "DFW": 70.0,
+    }
+
+    # Fallback base if an airport is not listed
+    fallback_base_rate = 70.0
+
+    airport = (destination_airport or "").upper()
+    base = base_rates.get(airport, fallback_base_rate)
+
+    # Hidden membership discount (e.g. 20% off Hertz for MIIP)
+    MEMBERSHIP_DISCOUNT_PERCENT = 20.0  # change this in code if your deal changes
+
+    discounted = base * (1.0 - MEMBERSHIP_DISCOUNT_PERCENT / 100.0)
+
+    # Round for clean display
+    return round(discounted, 2)
+
+
+# -----------------------------------------------------------------------------
 # 4. STREAMLIT UI
 # -----------------------------------------------------------------------------
 
@@ -260,7 +279,7 @@ st.set_page_config(page_title="MIIP Trip Cost Calculator", layout="wide")
 st.title("MIIP Trip Cost Calculator")
 st.caption(
     "Automatically estimate flight, hotel, meals (GSA per diem), "
-    "and ground costs for audit trips."
+    "and Hertz rental costs for audit trips."
 )
 
 # --- Top-level layout --------------------------------------------------------
@@ -304,8 +323,10 @@ with col_right:
     client_office_address = st.text_input(
         "Client office address",
         value="",
-        help="Used to approximate hotel proximity and to look up GSA meal per diem "
-             "via ZIP code (e.g. '123 Main St, Tampa, FL 33602').",
+        help=(
+            "Used to approximate hotel proximity and to look up GSA meal per diem "
+            "via ZIP code (e.g. '123 Main St, Tampa, FL 33602')."
+        ),
     )
 
     destination_city_for_meals = st.text_input(
@@ -333,29 +354,38 @@ st.subheader("Dates & ground costs")
 col_dates_left, col_dates_right = st.columns(2)
 
 with col_dates_left:
-    departure_date = st.date_input("Departure date", value=date.today())
-    return_date = st.date_input("Return date", value=date.today())
+    # Streamlit requires a default; we use today as a starting point.
+    departure_date = st.date_input(
+        "Departure date",
+        value=date.today(),
+        help="Select your departure date.",
+    )
 
 with col_dates_right:
-    include_rental_car = st.checkbox("Include rental car (Hertz or other)", value=True)
-
-    rental_car_daily_rate = st.number_input(
-        "Estimated rental car rate per day (USD)",
-        min_value=0.0,
-        step=1.0,
-        value=60.0,
+    # Return date cannot be earlier than departure date.
+    return_date = st.date_input(
+        "Return date",
+        value=departure_date,
+        min_value=departure_date,
+        help="Must be on or after the departure date.",
     )
 
-    other_fixed_costs = st.number_input(
-        "Other fixed costs (USD)",
-        min_value=0.0,
-        value=0.0,
-        step=10.0,
-        help="Any additional one-time costs (parking, tolls, etc.)",
-    )
+include_rental_car = st.checkbox("Include Hertz rental car", value=True)
+st.caption(
+    "If checked, the tool will estimate Hertz SUV rental cost automatically "
+    "using MIIP's internal membership-adjusted rate (hidden)."
+)
+
+other_fixed_costs = st.number_input(
+    "Other fixed costs (USD)",
+    min_value=0.0,
+    value=0.0,
+    step=10.0,
+    help="Any additional one-time costs (parking, tolls, etc.)",
+)
 
 trip_nights = max((return_date - departure_date).days, 0)
-trip_days = trip_nights or 1  # at least one day for meals
+trip_days = trip_nights or 1  # at least one day for meals / car
 
 # -----------------------------------------------------------------------------
 # 5. FLIGHTS SECTION
@@ -494,31 +524,53 @@ if st.button("Calculate trip cost"):
         # Meals: GSA per-diem * days * travelers
         total_meals = meals_rate_per_day * trip_days * num_travelers
 
-        # Rental car: one shared car for the group
+        # Rental car: one shared Hertz SUV for the group
         if include_rental_car:
-            total_rental = rental_car_daily_rate * trip_days
+            hertz_daily_rate = get_estimated_hertz_membership_daily_rate(destination_airport)
+            total_rental = hertz_daily_rate * trip_days
         else:
+            hertz_daily_rate = 0.0
             total_rental = 0.0
 
-        total_cost = total_flights + total_hotel + total_meals + total_rental + other_fixed_costs
+        total_cost = (
+            total_flights
+            + total_hotel
+            + total_meals
+            + total_rental
+            + other_fixed_costs
+        )
 
         st.markdown("### Trip cost summary")
 
         st.write(f"**Auditor(s):** {auditor_name or 'N/A'}")
         st.write(f"**Travelers:** {num_travelers}")
-        st.write(f"**Route:** {departure_airport} → {destination_airport}")
-        st.write(f"**Dates:** {departure_date.isoformat()} to {return_date.isoformat()} "
-                 f"({trip_days} day(s), {trip_nights} night(s))")
+        st.write(
+            f"**Route:** {departure_airport} → {destination_airport}"
+        )
+        st.write(
+            f"**Dates:** {departure_date.isoformat()} to {return_date.isoformat()} "
+            f"({trip_days} day(s), {trip_nights} night(s))"
+        )
 
         st.markdown("---")
 
-        st.write(f"**Flights total** ({num_travelers} × ${avg_flight_cost_per_person:,.2f}): "
-                 f"${total_flights:,.2f}")
-        st.write(f"**Hotel total** ({num_travelers} rooms × {hotel_nights} night(s) "
-                 f"× ${avg_hotel_nightly_rate:,.2f}/night): ${total_hotel:,.2f}")
-        st.write(f"**Meals total** ({num_travelers} traveler(s) × {trip_days} day(s) "
-                 f"× ${meals_rate_per_day:,.2f}/day): ${total_meals:,.2f}")
-        st.write(f"**Rental car total**: ${total_rental:,.2f}")
+        st.write(
+            f"**Flights total** ({num_travelers} × ${avg_flight_cost_per_person:,.2f}): "
+            f"${total_flights:,.2f}"
+        )
+        st.write(
+            f"**Hotel total** ({num_travelers} rooms × {hotel_nights} night(s) "
+            f"× ${avg_hotel_nightly_rate:,.2f}/night): ${total_hotel:,.2f}"
+        )
+        st.write(
+            f"**Meals total** ({num_travelers} traveler(s) × {trip_days} day(s) "
+            f"× ${meals_rate_per_day:,.2f}/day): ${total_meals:,.2f}"
+        )
+        st.write(
+            f"**Hertz rental total** "
+            f"({trip_days} day(s) × ${hertz_daily_rate:,.2f}/day, 1 shared vehicle): "
+            f"${total_rental:,.2f}"
+        )
         st.write(f"**Other fixed costs**: ${other_fixed_costs:,.2f}")
 
         st.markdown("### **Grand total**")
