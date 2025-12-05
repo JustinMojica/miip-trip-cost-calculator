@@ -1,16 +1,11 @@
-import math
-import os
-import re
 from datetime import date, timedelta
 from typing import Optional, Tuple
 
-import requests
 import streamlit as st
 from amadeus import Client, ResponseError
 
-
 # -----------------------------------------------------------------------------
-# Helpers: external clients
+# Amadeus client (flights only)
 # -----------------------------------------------------------------------------
 @st.cache_resource(show_spinner=False)
 def get_amadeus_client() -> Client:
@@ -23,13 +18,6 @@ def get_amadeus_client() -> Client:
     )
 
 
-def get_gsa_api_key() -> Optional[str]:
-    try:
-        return st.secrets["gsa"]["api_key"]
-    except Exception:
-        return None
-
-
 # -----------------------------------------------------------------------------
 # Flights via Amadeus
 # -----------------------------------------------------------------------------
@@ -39,6 +27,7 @@ AIRLINE_CODES = {
     "JetBlue": "B6",
     "American": "AA",
 }
+
 
 def fetch_roundtrip_flight_avg(
     origin: str,
@@ -76,6 +65,7 @@ def fetch_roundtrip_flight_avg(
                 total = float(offer["price"]["grandTotal"])
                 prices.append(total)
             except Exception:
+            # Skip any malformed offers
                 continue
 
         if not prices:
@@ -89,35 +79,137 @@ def fetch_roundtrip_flight_avg(
 
 
 # -----------------------------------------------------------------------------
-# Hotels: smart estimates (no Amadeus)
+# Hotels: smart estimates (no API)
+# Business-realistic per-airport nightly rates
 # -----------------------------------------------------------------------------
-# Simple mapping of destination airport -> typical corporate nightly rate for
-# your preferred brands (Marriott / Hilton / Wyndham).  These are just
-# starting points and can be tuned as you see actual data.
+# These are *estimate* corporate nightly rates (before tax/fees) for
+# typical Marriott/Hilton/Wyndham-type properties near each airport.
+# You can tweak any single airport later if you see consistent differences.
 HOTEL_BASE_RATE_BY_AIRPORT = {
-    # Higher-cost markets
+    # Northeast / NYC / Boston
     "BOS": 260.0,
-    "JFK": 280.0,
-    "LGA": 270.0,
-    "EWR": 240.0,
-    "LAX": 270.0,
-    "SFO": 320.0,
-    "MIA": 250.0,
-    "FLL": 210.0,
-    # Florida markets you mentioned
-    "TPA": 190.0,
-    "MCO": 185.0,
+    "JFK": 310.0,
+    "LGA": 300.0,
+    "EWR": 260.0,
+    "BDL": 190.0,
+    "PVD": 185.0,
+    "ALB": 175.0,
+    "PWM": 190.0,
+
+    # Mid-Atlantic / DC / Philly / Baltimore
+    "DCA": 260.0,
+    "IAD": 260.0,
+    "BWI": 210.0,
+    "PHL": 220.0,
+    "RIC": 185.0,
+    "ORF": 185.0,
+
+    # New York State / NJ (non-NYC)
+    "BUF": 170.0,
+    "ROC": 165.0,
+    "SYR": 165.0,
+    "HPN": 240.0,
+    "SWF": 180.0,
+
+    # Southeast big hubs
+    "ATL": 210.0,
+    "CLT": 195.0,
+    "RDU": 190.0,
+    "BNA": 200.0,
+    "CHS": 200.0,
+    "GSP": 175.0,
+
+    # Florida
+    "MIA": 260.0,
+    "FLL": 220.0,
+    "PBI": 220.0,
+    "TPA": 195.0,
+    "MCO": 190.0,
     "RSW": 195.0,
-    # Add more as needed…
+    "JAX": 180.0,
+    "SRQ": 195.0,
+    "ECP": 185.0,
+    "PNS": 185.0,
+
+    # Midwest / Great Lakes
+    "ORD": 260.0,
+    "MDW": 230.0,
+    "MSP": 220.0,
+    "DTW": 200.0,
+    "CLE": 175.0,
+    "CMH": 175.0,
+    "IND": 175.0,
+    "MKE": 185.0,
+    "STL": 185.0,
+    "CVG": 180.0,
+    "PIT": 180.0,
+    "DSM": 170.0,
+    "MCI": 185.0,
+    "OMA": 180.0,
+
+    # Texas
+    "DFW": 195.0,
+    "DAL": 185.0,
+    "IAH": 195.0,
+    "HOU": 185.0,
+    "AUS": 220.0,
+    "SAT": 190.0,
+    "ELP": 175.0,
+
+    # West Coast / California
+    "LAX": 280.0,
+    "BUR": 250.0,
+    "SNA": 260.0,
+    "LGB": 240.0,
+    "SAN": 260.0,
+    "SFO": 320.0,
+    "OAK": 270.0,
+    "SJC": 275.0,
+    "SMF": 210.0,
+    "PSP": 240.0,
+    "ONT": 210.0,
+
+    # Pacific Northwest
+    "SEA": 260.0,
+    "PDX": 220.0,
+    "GEG": 185.0,
+    "BOI": 185.0,
+
+    # Mountain / Rockies
+    "DEN": 230.0,
+    "SLC": 200.0,
+    "COS": 185.0,
+    "ABQ": 180.0,
+    "BZN": 230.0,
+    "JAC": 250.0,
+
+    # Desert / Southwest
+    "PHX": 210.0,
+    "TUS": 185.0,
+    "LAS": 220.0,
+    "RNO": 195.0,
+
+    # West / Other
+    "FAT": 190.0,
+    "RAP": 180.0,
+
+    # Hawaii / Alaska
+    "HNL": 320.0,
+    "OGG": 340.0,
+    "KOA": 320.0,
+    "LIH": 330.0,
+    "ANC": 260.0,
+    "FAI": 240.0,
 }
 
-DEFAULT_HOTEL_NIGHTLY_RATE = 195.0  # catch-all estimate
+# Default if airport is not specifically in the table.
+DEFAULT_HOTEL_NIGHTLY_RATE = 190.0
 
 
 def estimate_hotel_nightly_rate(dest_airport: str) -> float:
     """
     Smart nightly estimate based on destination airport.
-    Can be refined as you get real data.
+    Falls back to DEFAULT_HOTEL_NIGHTLY_RATE only if not in the table.
     """
     dest_airport = (dest_airport or "").upper().strip()
     return HOTEL_BASE_RATE_BY_AIRPORT.get(dest_airport, DEFAULT_HOTEL_NIGHTLY_RATE)
@@ -125,26 +217,128 @@ def estimate_hotel_nightly_rate(dest_airport: str) -> float:
 
 # -----------------------------------------------------------------------------
 # Hertz rental car: smart estimates (membership-adjusted, hidden)
+# Business-realistic daily rates per airport
 # -----------------------------------------------------------------------------
 HERTZ_BASE_DAILY_BY_AIRPORT = {
-    # Busy, more expensive markets
+    # Northeast / NYC / Boston
     "BOS": 95.0,
-    "JFK": 110.0,
-    "LGA": 105.0,
-    "EWR": 100.0,
-    "LAX": 115.0,
-    "SFO": 120.0,
-    "MIA": 100.0,
-    "FLL": 90.0,
-    # Florida markets you actually use
-    "TPA": 80.0,
-    "MCO": 82.0,
-    "RSW": 78.0,
-    # Catch-all
-}
-HERTZ_DEFAULT_BASE_DAILY = 75.0
+    "JFK": 115.0,
+    "LGA": 112.0,
+    "EWR": 110.0,
+    "BDL": 80.0,
+    "PVD": 78.0,
+    "ALB": 78.0,
+    "PWM": 82.0,
 
-# Hidden knobs – you can tweak these, auditors will only see the final price.
+    # Mid-Atlantic / DC / Philly / Baltimore
+    "DCA": 100.0,
+    "IAD": 98.0,
+    "BWI": 88.0,
+    "PHL": 92.0,
+    "RIC": 80.0,
+    "ORF": 80.0,
+
+    # New York State / NJ (non-NYC)
+    "BUF": 78.0,
+    "ROC": 76.0,
+    "SYR": 76.0,
+    "HPN": 90.0,
+    "SWF": 78.0,
+
+    # Southeast big hubs
+    "ATL": 90.0,
+    "CLT": 85.0,
+    "RDU": 84.0,
+    "BNA": 86.0,
+    "CHS": 88.0,
+    "GSP": 80.0,
+
+    # Florida
+    "MIA": 95.0,
+    "FLL": 88.0,
+    "PBI": 90.0,
+    "TPA": 82.0,
+    "MCO": 84.0,
+    "RSW": 82.0,
+    "JAX": 78.0,
+    "SRQ": 82.0,
+    "ECP": 76.0,
+    "PNS": 76.0,
+
+    # Midwest / Great Lakes
+    "ORD": 95.0,
+    "MDW": 92.0,
+    "MSP": 92.0,
+    "DTW": 88.0,
+    "CLE": 80.0,
+    "CMH": 80.0,
+    "IND": 80.0,
+    "MKE": 82.0,
+    "STL": 82.0,
+    "CVG": 80.0,
+    "PIT": 80.0,
+    "DSM": 78.0,
+    "MCI": 80.0,
+    "OMA": 80.0,
+
+    # Texas
+    "DFW": 86.0,
+    "DAL": 84.0,
+    "IAH": 86.0,
+    "HOU": 84.0,
+    "AUS": 90.0,
+    "SAT": 84.0,
+    "ELP": 78.0,
+
+    # West Coast / California
+    "LAX": 105.0,
+    "BUR": 98.0,
+    "SNA": 100.0,
+    "LGB": 95.0,
+    "SAN": 95.0,
+    "SFO": 110.0,
+    "OAK": 98.0,
+    "SJC": 100.0,
+    "SMF": 88.0,
+    "PSP": 96.0,
+    "ONT": 88.0,
+
+    # Pacific Northwest
+    "SEA": 95.0,
+    "PDX": 88.0,
+    "GEG": 80.0,
+    "BOI": 80.0,
+
+    # Mountain / Rockies
+    "DEN": 95.0,
+    "SLC": 88.0,
+    "COS": 82.0,
+    "ABQ": 80.0,
+    "BZN": 90.0,
+    "JAC": 98.0,
+
+    # Desert / Southwest
+    "PHX": 90.0,
+    "TUS": 82.0,
+    "LAS": 90.0,
+    "RNO": 84.0,
+
+    # West / Other
+    "FAT": 82.0,
+    "RAP": 80.0,
+
+    # Hawaii / Alaska
+    "HNL": 110.0,
+    "OGG": 112.0,
+    "KOA": 108.0,
+    "LIH": 110.0,
+    "ANC": 95.0,
+    "FAI": 90.0,
+}
+
+HERTZ_DEFAULT_BASE_DAILY = 80.0
+
+# Hidden knobs – realistic + conservative.
 HERTZ_SUV_UPLIFT = 0.15           # SUVs cost ~15% more than compact.
 HERTZ_MEMBERSHIP_DISCOUNT = 0.12  # 12% off for your corporate/membership rate.
 
@@ -164,77 +358,61 @@ def estimate_hertz_suv_daily_rate(dest_airport: str) -> float:
 
 
 # -----------------------------------------------------------------------------
-# GSA Meals & Incidental (M&IE) via ZIP
+# Meals: smart formula (base + uplift by city type)
 # -----------------------------------------------------------------------------
-ZIP_RE = re.compile(r"\b(\d{5})(?:-\d{4})?\b")
+BASE_MEAL_RATE = 100.0  # USD per traveler per day
+
+# +25% expensive markets
+EXPENSIVE_AIRPORTS = {
+    # Boston / NYC
+    "BOS", "JFK", "LGA", "EWR",
+    # DC
+    "DCA", "IAD",
+    # Chicago
+    "ORD", "MDW",
+    # California big coastal
+    "SFO", "OAK", "SJC", "LAX", "SAN",
+    # Seattle
+    "SEA",
+    # South Florida
+    "MIA", "FLL",
+    # Hawaii
+    "HNL", "OGG", "KOA", "LIH",
+    # Denver (high cost of dining)
+    "DEN",
+}
+
+# +10% mid-tier markets
+MID_TIER_AIRPORTS = {
+    # East / Southeast
+    "PHL", "BWI", "CLT", "RDU", "BNA", "ATL", "MCO", "TPA", "RSW", "PBI",
+    # Midwest
+    "MSP", "DTW", "CLE", "CMH", "IND", "STL", "MKE", "PIT",
+    # Texas
+    "DFW", "DAL", "IAH", "HOU", "AUS", "SAT",
+    # West
+    "PDX", "SMF", "SNA", "BUR", "LGB", "ONT", "PHX", "LAS", "RNO",
+    # Mountain
+    "SLC", "ABQ",
+}
 
 
-def extract_zip_from_address(address: str) -> Optional[str]:
-    if not address:
-        return None
-    m = ZIP_RE.search(address)
-    if m:
-        return m.group(1)
-    return None
-
-
-def guess_gsa_fiscal_year(travel_date: date) -> int:
+def estimate_meal_rate_per_day(dest_airport: str) -> float:
     """
-    GSA uses fiscal years starting Oct 1.
-    For simplicity:
-      - Jan–Sep: use calendar year
-      - Oct–Dec: use calendar year + 1
+    Meal formula:
+      - Base $100/day per traveler
+      - +25% for expensive airports
+      - +10% for mid-tier airports
     """
-    if travel_date.month >= 10:
-        return travel_date.year + 1
-    return travel_date.year
+    dest_airport = (dest_airport or "").upper().strip()
+    rate = BASE_MEAL_RATE
 
+    if dest_airport in EXPENSIVE_AIRPORTS:
+        rate *= 1.25
+    elif dest_airport in MID_TIER_AIRPORTS:
+        rate *= 1.10
 
-def fetch_gsa_meals_rate(zip_code: str, travel_date: date) -> Tuple[Optional[float], Optional[str]]:
-    """
-    Fetch GSA M&IE daily rate (meals only) by ZIP.
-    Returns (rate, error_message).
-    """
-    api_key = get_gsa_api_key()
-    if not api_key:
-        return None, "No GSA API key configured in secrets."
-
-    fiscal_year = guess_gsa_fiscal_year(travel_date)
-
-    # GSA API format using path segments, e.g.
-    # https://api.gsa.gov/travel/perdiem/v2/rates/zip/33602/year/2025?api_key=...
-    url = (
-        f"https://api.gsa.gov/travel/perdiem/v2/rates/"
-        f"zip/{zip_code}/year/{fiscal_year}?api_key={api_key}"
-    )
-
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-
-        # Try a few likely key names for meals-only rate.
-        rates = data.get("rates") or data.get("rate") or []
-        mie = None
-        for r in rates:
-            mie = (
-                r.get("meals_and_incidental_expenses")
-                or r.get("meals_and_incidentals")
-                or r.get("m_ie")
-                or r.get("meals")
-            )
-            if mie:
-                break
-
-        if mie is None:
-            return None, "GSA response did not include a meals (M&IE) field."
-
-        return float(mie), None
-
-    except requests.HTTPError as e:
-        return None, f"GSA per diem API error: {e}"
-    except Exception as e:
-        return None, f"GSA per diem API error: {e}"
+    return round(rate, 2)
 
 
 # -----------------------------------------------------------------------------
@@ -256,7 +434,7 @@ def calc_trip_nights(depart: date, ret: date) -> int:
 st.set_page_config(page_title="MIIP Trip Cost Calculator", layout="wide")
 
 st.title("MIIP Trip Cost Calculator")
-st.caption("Automatic estimate flight, hotel, meals (GSA per diem), and Hertz car costs for audit trips.")
+st.caption("Automatic estimate of flights, hotel, meals, and Hertz car costs for audit trips.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Traveler & flights
@@ -292,7 +470,7 @@ with col_b:
     client_address = st.text_input(
         "Client office address",
         value="",
-        help="Include city, state and ZIP if possible – we’ll use the ZIP for GSA meals.",
+        help="Currently used only for documentation in this version.",
     )
 
     destination_airport = st.text_input(
@@ -319,7 +497,7 @@ with col_dates:
     departure_date = st.date_input(
         "Departure date",
         value=date.today(),
-        help="You can change this – it defaults to today because Streamlit requires an initial date.",
+        help="Defaults to today because Streamlit requires an initial date.",
     )
 
     return_date = st.date_input(
@@ -407,7 +585,7 @@ else:
 st.header("4. Hotel (preferred brand – smart estimate)")
 
 st.info(
-    "Hotel pricing now uses a smart nightly estimate based on the destination airport "
+    "Hotel pricing uses a smart nightly estimate based on the destination airport "
     "and typical rates for your preferred brand. No manual nightly entry and no hotel API "
     "calls, so it always works."
 )
@@ -416,51 +594,37 @@ hotel_nightly_rate = estimate_hotel_nightly_rate(destination_airport)
 hotel_total = hotel_nightly_rate * trip_nights * travelers
 
 st.write(
-    f"- Estimated nightly rate for {preferred_hotel_brand} near {destination_airport}: "
+    f"- Estimated nightly rate for {preferred_hotel_brand} near {destination_airport.upper()}: "
     f"**${hotel_nightly_rate:,.2f}**"
 )
 st.write(f"- Trip nights: **{trip_nights}**")
 st.write(f"- Travelers / rooms: **{travelers}** (one room per traveler)")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Meals – GSA M&IE by ZIP
+# 5. Meals – smart formula (base + uplift by city tier)
 # ─────────────────────────────────────────────────────────────────────────────
-st.header("5. Meals (GSA Per Diem – M&IE only)")
+st.header("5. Meals (smart estimate)")
 
-auto_zip = extract_zip_from_address(client_address)
-zip_override = st.text_input(
-    "Destination ZIP for GSA (optional override)",
-    value=auto_zip or "",
-    help="If blank, we’ll try to detect a 5-digit ZIP from the client office address above.",
-)
+meal_rate_per_day = estimate_meal_rate_per_day(destination_airport)
+dest_upper = destination_airport.upper()
 
-effective_zip = zip_override.strip() or (auto_zip or "").strip()
-
-meals_rate_per_day = 0.0
-meals_debug_msg = ""
-
-if not effective_zip:
-    st.warning(
-        "Could not detect a valid ZIP from the client office address. "
-        "Enter a ZIP above to enable GSA meals per diem."
+if dest_upper in EXPENSIVE_AIRPORTS:
+    st.info(
+        f"{dest_upper} is treated as a **high-cost city** (Boston/NYC/LA/SF/DC/etc). "
+        f"Base $100/day increased by 25%."
+    )
+elif dest_upper in MID_TIER_AIRPORTS:
+    st.info(
+        f"{dest_upper} is treated as a **mid-tier city** (Austin, Denver, Charlotte, etc.). "
+        f"Base $100/day increased by 10%."
     )
 else:
-    mie_rate, err = fetch_gsa_meals_rate(effective_zip, departure_date)
-    if err:
-        st.error(err)
-        meals_debug_msg = err
-        st.warning(
-            "Unable to retrieve meals per diem from GSA. "
-            "Meals will be treated as $0 unless you add them into 'Other fixed costs'."
-        )
-    else:
-        meals_rate_per_day = mie_rate
-        st.success(
-            f"GSA M&IE daily rate for ZIP {effective_zip} (fiscal year estimate): "
-            f"**${mie_rate:,.2f} per day**"
-        )
+    st.info("Destination treated as a standard-cost city with a base $100/day meal rate.")
 
-meals_total = meals_rate_per_day * trip_days * travelers
+st.write(
+    f"- Meal rate per traveler per day: **${meal_rate_per_day:,.2f}**"
+)
+meals_total = meal_rate_per_day * trip_days * travelers
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Hertz rental car – smart estimate
@@ -478,7 +642,7 @@ if include_rental_car:
         "already applied. Auditors only see the final price."
     )
     st.write(
-        f"- Estimated Hertz SUV daily rate near {destination_airport}: "
+        f"- Estimated Hertz SUV daily rate near {destination_airport.upper()}: "
         f"**${rental_daily_rate:,.2f} / day**"
     )
     st.write(f"- Rental days: **{trip_days}**")
@@ -505,7 +669,7 @@ else:
 
     st.subheader("Breakdown")
 
-    st.write(f"**Route:** {departure_airport} → {destination_airport}")
+    st.write(f"**Route:** {departure_airport} → {destination_airport.upper()}")
     st.write(
         f"**Dates:** {departure_date.isoformat()} to {return_date.isoformat()} "
         f"({trip_days} day(s), {trip_nights} night(s))"
@@ -529,13 +693,10 @@ else:
     )
 
     st.write(f"**Meals total:** ${meals_total:,.2f}")
-    if meals_rate_per_day > 0:
-        st.caption(
-            f"{travelers} traveler(s) × {trip_days} day(s) × "
-            f"${meals_rate_per_day:,.2f}/day (GSA M&IE per diem)."
-        )
-    else:
-        st.caption("Meals treated as $0 (GSA rate not available or ZIP missing).")
+    st.caption(
+        f"{travelers} traveler(s) × {trip_days} day(s) × "
+        f"${meal_rate_per_day:,.2f}/day (smart formula with city-tier uplift)."
+    )
 
     st.write(f"**Rental car total:** ${rental_car_total:,.2f}")
     if include_rental_car and rental_daily_rate > 0:
@@ -555,7 +716,7 @@ else:
 
     st.caption(
         "Notes: Flights use Amadeus Production APIs where available. "
-        "Hotels use a smart nightly estimate by destination airport. "
-        "Meals use GSA M&IE per diem by ZIP when available. "
+        "Hotels use business-realistic nightly estimates by destination airport. "
+        "Meals use a $100/day base with +25% for expensive cities and +10% for mid-tier cities. "
         "Hertz rental car prices are smart membership-adjusted estimates for SUVs."
     )
