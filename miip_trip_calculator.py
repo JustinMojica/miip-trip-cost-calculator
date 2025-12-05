@@ -1,629 +1,689 @@
 import math
-from datetime import date, timedelta
-from typing import Optional, Tuple
+import re
+from datetime import date, datetime, timedelta
+from typing import Optional, Tuple, List
 
 import requests
 import streamlit as st
 from amadeus import Client, ResponseError
 
 
-# -----------------------------------------------------------------------------
-# 1. Helpers: parse address, dates, etc.
-# -----------------------------------------------------------------------------
+# =========================
+# 1. Helper functions
+# =========================
 
-def parse_client_address(address: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def load_amadeus_client() -> Optional[Client]:
     """
-    Very simple parser for client office address.
-
-    Expected common formats:
-      - "123 Main St, Tampa, FL 33602"
-      - "Tampa, FL 33602"
-      - "Tampa FL 33602"
-
-    Returns (city, state, zip_code) – any of them may be None if parsing fails.
+    Create an Amadeus client from Streamlit secrets.
+    Returns None if secrets are missing or misconfigured.
     """
-    if not address:
-        return None, None, None
-
-    # Try to grab a 5-digit ZIP from the string
-    import re
-    zip_match = re.search(r"\b(\d{5})(?:-\d{4})?\b", address)
-    zip_code = zip_match.group(1) if zip_match else None
-
-    # Split by commas and look at the last part for "ST ZIP"
-    parts = [p.strip() for p in address.split(",") if p.strip()]
-
-    city = None
-    state = None
-
-    if len(parts) >= 2:
-        # e.g. ["123 Main St", "Tampa", "FL 33602"]
-        city_candidate = parts[-2]
-        tail = parts[-1]
-        tokens = tail.split()
-        if len(tokens) >= 1:
-            # last token might be ZIP, previous one might be state
-            maybe_state = tokens[0]
-            if len(maybe_state) == 2 and maybe_state.isalpha():
-                state = maybe_state.upper()
-                city = city_candidate
-    elif len(parts) == 1:
-        # e.g. "Tampa FL 33602"
-        tokens = parts[0].split()
-        if len(tokens) >= 3:
-            # assume "... CITY STATE ZIP"
-            maybe_state = tokens[-2]
-            if len(maybe_state) == 2 and maybe_state.isalpha():
-                state = maybe_state.upper()
-                city = " ".join(tokens[:-2])
-
-    return city, state, zip_code
-
-
-def compute_days_and_nights(dep: date, ret: date) -> Tuple[int, int]:
-    """
-    Returns (trip_days, hotel_nights).
-    If dep == ret, it's a 1-day, 1-night trip.
-    """
-    if dep > ret:
-        return 0, 0
-    delta = (ret - dep).days
-    if delta <= 0:
-        return 1, 1
-    return delta + 1, delta
-
-
-# -----------------------------------------------------------------------------
-# 2. Amadeus: client + flights + hotels
-# -----------------------------------------------------------------------------
-
-@st.cache_resource(show_spinner=False)
-def get_amadeus_client() -> Client:
-    """
-    Create and cache a single Amadeus client using Streamlit secrets.
-    """
-    cfg = st.secrets["amadeus"]
-    return Client(
-        client_id=cfg["client_id"],
-        client_secret=cfg["client_secret"],
-        hostname=cfg.get("hostname", "production"),
-    )
-
-
-AIRLINE_TO_CARRIER = {
-    "Delta": "DL",
-    "JetBlue": "B6",
-    "Southwest": "WN",
-    "American": "AA",
-}
-
-
-def get_average_roundtrip_fare(
-    amadeus: Client,
-    origin: str,
-    destination: str,
-    dep: date,
-    ret: date,
-    travelers: int,
-    preferred_airline: str,
-) -> Optional[float]:
-    """
-    Use Amadeus Flight Offers Search to get an average roundtrip fare
-    for the preferred airline. Returns price per person in USD, or None on error.
-    """
-    carrier_code = AIRLINE_TO_CARRIER.get(preferred_airline)
-    if not carrier_code:
-        return None
-
     try:
-        response = amadeus.shopping.flight_offers_search.get(
-            originLocationCode=origin,
-            destinationLocationCode=destination,
-            departureDate=dep.isoformat(),
-            returnDate=ret.isoformat(),
-            adults=travelers,
-            currencyCode="USD",
-            max=50,
+        cfg = st.secrets["amadeus"]
+        client_id = cfg.get("client_id")
+        client_secret = cfg.get("client_secret")
+        hostname = cfg.get("hostname", "production")
+
+        if not client_id or not client_secret:
+            st.error("Amadeus secrets are missing. Please configure them in Streamlit.")
+            return None
+
+        amadeus = Client(
+            client_id=client_id,
+            client_secret=client_secret,
+            hostname=hostname,
         )
-        offers = response.data
-    except ResponseError as e:
-        st.error(f"Amadeus flight search failed: [{e.response.status_code}] {e}")
-        return None
+        return amadeus
     except Exception as e:
-        st.error(f"Unexpected error during Amadeus flight search: {e}")
+        st.error(f"Unable to load Amadeus client from secrets: {e}")
         return None
 
-    prices = []
-    for offer in offers:
-        try:
-            # Each offer can have multiple itineraries; check marketing carrier
-            airlines = set(
-                seg["carrierCode"]
-                for itin in offer.get("itineraries", [])
-                for seg in itin.get("segments", [])
-            )
-            if carrier_code not in airlines:
-                continue
 
-            total_str = offer["price"]["grandTotal"]
-            total = float(total_str)
-            # price is for ALL travelers; convert to per-person
-            per_person = total / travelers if travelers > 0 else total
-            prices.append(per_person)
-        except Exception:
-            continue
-
-    if not prices:
+def extract_zip_from_address(addr: str) -> Optional[str]:
+    """
+    Try to find a 5-digit ZIP code in the client office address.
+    Returns None if no obvious ZIP is found.
+    """
+    if not addr:
         return None
-
-    # Average, then round sensibly
-    avg = sum(prices) / len(prices)
-    return round(avg, 2)
+    m = re.search(r"\b(\d{5})\b", addr)
+    return m.group(1) if m else None
 
 
-HOTEL_BRANDS = ["Marriott", "Hilton", "Wyndham"]
-
-
-def get_average_hotel_nightly_rate(
-    amadeus: Client,
-    city_code: str,
-    check_in: date,
-    check_out: date,
-    preferred_brand: str,
-) -> Optional[float]:
+def trip_day_counts(dep: Optional[date], ret: Optional[date]) -> Tuple[int, int]:
     """
-    Use Amadeus Hotel Offers to get an average nightly rate in USD
-    for hotels in a city that roughly match the preferred brand.
-
-    NOTE: We use the low-level GET on '/v3/shopping/hotel-offers' because
-    the high-level 'shopping.hotel_offers' attribute isn't available
-    in every version of the Amadeus SDK.
+    Given departure & return dates, compute:
+    - trip_days for flights / meals
+    - trip_nights for hotels / lodging
+    Both are at least 1 if both dates are present.
     """
-    params = {
-        "cityCode": city_code,
-        "checkInDate": check_in.isoformat(),
-        "checkOutDate": check_out.isoformat(),
-        "currencyCode": "USD",
-        "adults": 1,
-        "radius": 20,
-        "radiusUnit": "MILE",
-        "paymentPolicy": "NONE",
-        "includeClosed": False,
+    if not dep or not ret:
+        return 0, 0
+
+    delta_days = (ret - dep).days
+    if delta_days <= 0:
+        # Same-day trip: 1 day, 0–1 night depending on how you want to treat it.
+        return 1, 0
+    return delta_days, max(delta_days - 1, 1)
+
+
+def estimate_hertz_daily_rate(airport_code: str) -> float:
+    """
+    Smart, *free* estimator for Hertz SUV daily rate.
+
+    - Uses airport tiers (big hubs are more expensive).
+    - Applies a hidden membership discount so auditors only see the
+      final rate, not the discount %.
+
+    You can adjust these numbers later if you want.
+    """
+    code = (airport_code or "").strip().upper()
+
+    high_cost = {
+        "BOS", "JFK", "LGA", "EWR", "SFO", "LAX", "ORD",
+        "DCA", "IAD", "MIA", "SEA",
+    }
+    mid_cost = {
+        "TPA", "MCO", "SAN", "DEN", "ATL", "CLT", "IAH",
+        "PHX", "MSP", "DFW", "PHL",
     }
 
+    if code in high_cost:
+        base_daily = 95.0  # before membership
+    elif code in mid_cost:
+        base_daily = 80.0
+    else:
+        base_daily = 70.0  # smaller / cheaper markets
+
+    membership_discount_factor = 0.87  # ~13% off, hidden from UI
+    return round(base_daily * membership_discount_factor, 2)
+
+
+def lookup_gsa_meal_rate(zip_code: str, travel_year: int) -> Tuple[float, Optional[str]]:
+    """
+    Call the GSA per diem API to get **meals & incidental (M&IE)** rate for a ZIP+year.
+
+    Returns:
+      (m_ie_daily_amount, error_message_or_None)
+    """
     try:
-        response = amadeus.get("/v3/shopping/hotel-offers", **params)
-        hotels = response.data
-    except ResponseError as e:
-        st.error(f"Amadeus hotel list failed: [{e.response.status_code}] {e}")
-        return None
-    except Exception as e:
-        st.error(f"Unexpected error during Amadeus hotel search: {e}")
-        return None
+        api_key = st.secrets["gsa"]["api_key"]
+    except Exception:
+        return 0.0, "GSA API key missing from Streamlit secrets."
 
-    nights = max((check_out - check_in).days, 1)
-    brand_lower = preferred_brand.lower()
-    nightly_rates = []
-
-    for item in hotels:
-        try:
-            hotel_info = item.get("hotel", {})
-            hotel_name = (hotel_info.get("name") or "").lower()
-
-            # Very rough brand filter: look for brand name in hotel name
-            if brand_lower not in hotel_name:
-                continue
-
-            offers = item.get("offers", [])
-            for offer in offers:
-                price = offer.get("price", {})
-                total_str = price.get("total") or price.get("grandTotal")
-                if not total_str:
-                    continue
-                total = float(total_str)
-                nightly = total / nights
-                nightly_rates.append(nightly)
-        except Exception:
-            continue
-
-    if not nightly_rates:
-        return None
-
-    avg = sum(nightly_rates) / len(nightly_rates)
-    # Round to nearest whole dollar – hotel forecasts don’t need cents
-    return round(avg)
-
-
-# -----------------------------------------------------------------------------
-# 3. GSA per diem (meals only, via ZIP if possible)
-# -----------------------------------------------------------------------------
-
-def get_gsa_meals_per_diem(zip_code: Optional[str], dep: date) -> Optional[float]:
-    """
-    Fetch GSA M&IE (meals & incidental expenses) rate.
-
-    We primarily use ZIP if available. If ZIP is missing, we fall back to None
-    to avoid mysterious 404s on city/state combos.
-    """
     if not zip_code:
-        return None
+        return 0.0, "Destination ZIP could not be determined from the client address."
 
-    gsa_cfg = st.secrets.get("gsa")
-    if not gsa_cfg or "api_key" not in gsa_cfg:
-        return None
-
-    api_key = gsa_cfg["api_key"]
-
-    # GSA uses fiscal years (Oct 1 – Sep 30). Approximate fiscal year from departure date.
-    fiscal_year = dep.year + 1 if dep.month >= 10 else dep.year
-
-    url = "https://api.gsa.gov/travel/perdiem/v2/rates"
+    url = f"https://api.gsa.gov/travel/perdiem/v2/rates/zip/{zip_code}"
     params = {
-        "zip": zip_code,
-        "year": fiscal_year,
+        "year": str(travel_year),
         "api_key": api_key,
     }
 
     try:
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        st.error(
-            f"GSA per diem API error: {getattr(e, 'response', None) or e}"
-        )
-        return None
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            return 0.0, (
+                f"GSA per diem API error: {resp.status_code} "
+                f"{resp.reason} for URL: {resp.url}"
+            )
 
-    # The exact schema can vary slightly; be defensive.
-    try:
-        rates = data.get("rates") or data.get("result") or []
+        data = resp.json()
+        rates = data.get("rates") or []
+
         if not rates:
-            return None
+            return 0.0, "GSA per diem API returned no rates for that ZIP/year."
 
-        # Pick the first rate row
-        first = rates[0]
-        # Common keys seen in GSA API: "m_and_ie" or "meals_and_incidentals"
-        m_ie = first.get("m_and_ie") or first.get("meals_and_incidentals")
+        # The exact field name can vary; try a few likely ones.
+        m_ie = None
+        for rate in rates:
+            for key in [
+                "meals_and_incidentals",
+                "meals_and_incidental_expenses",
+                "m_and_ie",
+                "meals",
+                "mie",
+            ]:
+                if key in rate:
+                    val = rate[key]
+                    if isinstance(val, (int, float)):
+                        m_ie = float(val)
+                        break
+                    if isinstance(val, dict):
+                        for subkey in ["max", "standard_rate", "total", "full"]:
+                            if subkey in val:
+                                try:
+                                    m_ie = float(val[subkey])
+                                    break
+                                except Exception:
+                                    continue
+                if m_ie is not None:
+                    break
+            if m_ie is not None:
+                break
+
         if m_ie is None:
-            return None
-        return float(m_ie)
-    except Exception:
-        return None
+            return 0.0, (
+                "GSA per diem API response did not contain a recognizable "
+                "meals & incidentals field."
+            )
+
+        return float(m_ie), None
+    except Exception as e:
+        return 0.0, f"GSA per diem lookup error: {e}"
 
 
-# -----------------------------------------------------------------------------
-# 4. Hertz SUV rental smart default (with hidden membership discount)
-# -----------------------------------------------------------------------------
-
-def estimate_hertz_suv_daily_rate(city: Optional[str], state: Optional[str]) -> float:
+def get_average_flight_price(
+    amadeus: Client,
+    origin: str,
+    destination: str,
+    departure_date: date,
+    return_date: Optional[date],
+    adults: int,
+    preferred_airline_code: str,
+) -> Tuple[Optional[float], Optional[str]]:
     """
-    Smart-default estimator for Hertz SUV daily rate.
+    Use Amadeus Flight Offers Search to compute an average round-trip price
+    for a specific airline.
 
-    - Base public rate: $80/day
-    - City factor:
-        * Major hub (Tampa, Orlando, Miami, Boston, NYC) => +10–15%
-        * Otherwise => no change
-    - Membership discount: ~15% (applied silently at the end)
-
-    We hide the underlying percentages from auditors; they only see the final
-    estimated daily rate.
+    Returns (average_price, error_message_or_None).
     """
-    base_public = 80.0
+    if adults <= 0:
+        adults = 1
 
-    city_key = (city or "").lower()
-    state_key = (state or "").upper()
+    params = {
+        "originLocationCode": origin,
+        "destinationLocationCode": destination,
+        "departureDate": departure_date.isoformat(),
+        "adults": adults,
+        "currencyCode": "USD",
+        "max": 50,
+    }
+    if return_date:
+        params["returnDate"] = return_date.isoformat()
 
-    # Rough list of higher-cost airport metro areas
-    premium_cities = {"tampa", "orlando", "miami", "boston", "new york", "newark"}
-    premium_states = {"CA", "NY", "MA", "FL"}
+    try:
+        resp = amadeus.shopping.flight_offers_search.get(**params)
+        offers = resp.data or []
 
-    city_factor = 1.0
-    if city_key in premium_cities or state_key in premium_states:
-        city_factor = 1.15  # 15% more expensive markets
+        if not offers:
+            return None, "Amadeus returned no flight offers for the given route/dates."
 
-    # Membership discount – hidden from UI
-    membership_discount = 0.15  # 15% off
+        prices: List[float] = []
+        for offer in offers:
+            # Filter to offers where ALL segments are the preferred airline
+            itineraries = offer.get("itineraries", [])
+            all_segments = []
+            for itin in itineraries:
+                segs = itin.get("segments", [])
+                all_segments.extend(segs)
 
-    public_rate = base_public * city_factor
-    net_rate = public_rate * (1.0 - membership_discount)
+            if not all_segments:
+                continue
 
-    # Round to nice whole dollar
-    return round(net_rate)
+            airline_codes = {
+                seg.get("carrierCode") or seg.get("marketingCarrierCode")
+                for seg in all_segments
+            }
+            if preferred_airline_code and preferred_airline_code not in airline_codes:
+                continue
+
+            total_str = offer.get("price", {}).get("total")
+            if not total_str:
+                continue
+
+            try:
+                prices.append(float(total_str))
+            except ValueError:
+                continue
+
+        if not prices:
+            return None, (
+                "No flight offers were found for the preferred airline; "
+                "try a different airline or use manual pricing."
+            )
+
+        avg_price = sum(prices) / len(prices)
+        return round(avg_price, 2), None
+
+    except ResponseError as e:
+        return None, f"Amadeus flight search failed: [{e.response.status_code}] {e}"
+    except Exception as e:
+        return None, f"Unexpected error during Amadeus flight search: {e}"
 
 
-# -----------------------------------------------------------------------------
-# 5. Streamlit UI
-# -----------------------------------------------------------------------------
+def get_average_hotel_nightly_rate(
+    amadeus: Client,
+    destination_airport: str,
+    check_in: date,
+    check_out: date,
+    preferred_brand: str,
+) -> Tuple[Optional[float], Optional[str]]:
+    """
+    Use Amadeus Hotel Offers Search to estimate an average nightly rate
+    for the preferred hotel brand near the destination airport.
 
-st.set_page_config(page_title="MIIP Trip Cost Calculator", layout="wide")
+    This is intentionally conservative and heavily error-guarded, so that
+    a bad response just yields an explanatory error instead of a crash.
+    """
+    try:
+        city_code = destination_airport.strip().upper()
+        if not city_code:
+            return None, "Destination airport code is missing."
 
-st.title("MIIP Trip Cost Calculator")
-st.caption(
-    "Automatically estimate flight, hotel, meals (GSA per diem), and rental car costs for audit trips."
+        params = {
+            # Many Amadeus environments accept cityCode ≈ airport code for major cities.
+            "cityCode": city_code,
+            "checkInDate": check_in.isoformat(),
+            "checkOutDate": check_out.isoformat(),
+            "adults": 1,
+            "roomQuantity": 1,
+            "radius": 25,
+            "radiusUnit": "MILE",
+            "bestRateOnly": True,
+        }
+
+        resp = amadeus.shopping.hotel_offers_search.get(**params)
+        hotels = resp.data or []
+        if not hotels:
+            return None, "Amadeus returned no hotel offers for the given city/dates."
+
+        preferred_lower = preferred_brand.lower()
+        nightly_rates: List[float] = []
+
+        for item in hotels:
+            hotel_info = item.get("hotel", {})
+            name = (hotel_info.get("name") or "").lower()
+            if preferred_lower not in name:
+                # Only consider hotels whose name contains "Marriott", "Hilton", etc.
+                continue
+
+            offers = item.get("offers") or []
+            for offer in offers:
+                price = offer.get("price", {})
+                total_str = price.get("total")
+                if not total_str:
+                    continue
+
+                try:
+                    total_price = float(total_str)
+                except ValueError:
+                    continue
+
+                # derive number of nights from check-in/out if present, else use trip nights
+                offer_in = offer.get("checkInDate")
+                offer_out = offer.get("checkOutDate")
+                try:
+                    if offer_in and offer_out:
+                        d_in = datetime.fromisoformat(offer_in).date()
+                        d_out = datetime.fromisoformat(offer_out).date()
+                        nights = max((d_out - d_in).days, 1)
+                    else:
+                        nights = max((check_out - check_in).days, 1)
+                except Exception:
+                    nights = max((check_out - check_in).days, 1)
+
+                nightly_rates.append(total_price / nights)
+
+        if not nightly_rates:
+            return None, (
+                f"No {preferred_brand}-branded hotels were found in Amadeus "
+                "for that city and date range."
+            )
+
+        avg_nightly = sum(nightly_rates) / len(nightly_rates)
+        return round(avg_nightly, 2), None
+
+    except ResponseError as e:
+        return None, f"Amadeus hotel list failed: [{e.response.status_code}] {e}"
+    except Exception as e:
+        return None, f"Unexpected error during Amadeus hotel search: {e}"
+
+
+# =========================
+# 2. Streamlit UI
+# =========================
+
+st.set_page_config(
+    page_title="MIIP Trip Cost Calculator",
+    layout="wide",
 )
 
-# -------------------- Top: traveler & client info -----------------------------
+st.title("MIIP Trip Cost Calculator")
+st.caption("Automatically estimate flights, hotel, meals (GSA per diem), and car costs for audit trips.")
 
-col_left, col_right = st.columns(2)
 
-with col_left:
-    auditor_name = st.text_input("Auditor name", placeholder="e.g. Justin Mojica")
+# --------- 2.1 Traveler & client info ---------
+st.subheader("Traveler & flights")
 
-    travelers = st.number_input(
+col_a, col_b = st.columns(2)
+
+with col_a:
+    auditor_name = st.text_input("Auditor name", value="")
+
+    num_travelers = st.number_input(
         "Number of travelers (each gets their own room)",
         min_value=1,
-        max_value=10,
-        value=1,
         step=1,
+        value=1,
     )
 
     departure_airport = st.selectbox(
         "Departure airport (IATA)",
-        options=["BOS", "MHT"],
+        ["BOS", "MHT", "TPA", "MCO", "JFK", "LGA", "EWR", "Other"],
         index=0,
-        help="We usually fly out of BOS, but MHT is available as an option.",
     )
+    if departure_airport == "Other":
+        departure_airport = st.text_input(
+            "Enter departure airport code (IATA, e.g. BOS)",
+            value="BOS",
+            max_chars=3,
+        ).upper()
 
     destination_airport = st.text_input(
         "Destination airport (IATA, e.g. TPA)",
         value="TPA",
-        help="3-letter airport code near the client office.",
-    )
+        max_chars=3,
+    ).upper()
 
-    preferred_airline = st.selectbox(
+    preferred_airline_label = st.selectbox(
         "Preferred airline",
-        options=list(AIRLINE_TO_CARRIER.keys()),
-        index=1,  # JetBlue default
-    )
-
-with col_right:
-    client_address = st.text_input(
-        "Client office address",
-        placeholder="123 Main St, Tampa, FL 33602",
-        help="Used to infer city/ZIP for hotel search and GSA per diem.",
-    )
-
-    city, state, zip_code = parse_client_address(client_address)
-
-    preferred_hotel_brand = st.selectbox(
-        "Preferred hotel brand",
-        options=HOTEL_BRANDS,
+        ["JetBlue", "Delta", "Southwest", "American"],
         index=0,
     )
 
-# -------------------- Dates & ground costs ------------------------------------
+with col_b:
+    client_office_address = st.text_input(
+        "Client office address (include city, state, and ZIP)",
+        value="Tampa, FL 33602",
+        help="Used for mapping, meals (GSA ZIP), and general documentation.",
+    )
 
+    preferred_hotel_brand = st.selectbox(
+        "Preferred hotel brand",
+        ["Marriott", "Hilton", "Wyndham"],
+        index=0,
+    )
+
+    st.markdown("**Derived destination info (for display only)**")
+    dest_zip = extract_zip_from_address(client_office_address) or "N/A"
+    st.write(f"• Destination ZIP (for GSA): `{dest_zip}`")
+    st.write(f"• Destination airport: `{destination_airport or '??'}`")
+
+
+# --------- 2.2 Dates & ground costs ---------
 st.subheader("Dates & ground costs")
 
 col_dates, col_ground = st.columns(2)
 
 with col_dates:
-    today = date.today()
+    # Streamlit now supports value=None for empty date inputs in recent versions.
     departure_date = st.date_input(
         "Departure date",
-        value=today,
-        min_value=today,
+        value=None,
+        min_value=date.today(),
+        help="Select the first day of travel.",
     )
 
-    return_date = st.date_input(
-        "Return date",
-        value=departure_date + timedelta(days=1),
-        min_value=departure_date,
-        help="Must be on or after the departure date.",
-    )
+    if departure_date:
+        return_date = st.date_input(
+            "Return date",
+            value=departure_date + timedelta(days=1),
+            min_value=departure_date,
+            help="Select the last day of travel.",
+        )
+    else:
+        st.info("Select a departure date first to choose a return date.")
+        return_date = None
 
 with col_ground:
     include_rental = st.checkbox(
         "Include Hertz rental car",
         value=True,
-        help="If checked, the tool will estimate Hertz SUV rental cost automatically using MIIP's internal membership-adjusted rate (hidden).",
+        help=(
+            "If checked, the tool will estimate a Hertz SUV rental cost "
+            "automatically using MIIP's internal membership-adjusted rates."
+        ),
     )
 
     other_fixed_costs = st.number_input(
         "Other fixed costs (USD)",
         min_value=0.0,
-        value=0.0,
         step=10.0,
-        format="%.2f",
-        help="Any extra costs not covered elsewhere (parking, tolls, etc.).",
+        value=0.0,
+        help="Parking, tolls, other ground costs not covered elsewhere.",
     )
 
-trip_days, hotel_nights = compute_days_and_nights(departure_date, return_date)
 
-if trip_days <= 0 or hotel_nights <= 0:
-    st.error("Return date must be on or after departure date.")
-    st.stop()
-
-# -------------------- Section 3: Flights --------------------------------------
-
+# --------- 2.3 Flights (preferred airline) ---------
 st.subheader("3. Flights (preferred airline)")
 
 flight_mode = st.radio(
     "How should we calculate flights?",
-    options=["Use Amadeus average (preferred airline)", "Enter manually"],
+    ["Use Amadeus average (preferred airline)", "Enter manually"],
     index=0,
+    help="Amadeus uses live flight offers. Manual override is available if needed.",
 )
 
-amadeus_fare_per_person = None
-manual_flight_cost_per_person = None
-
-if flight_mode == "Use Amadeus average (preferred airline)":
-    st.info("Will query Amadeus for an average round-trip fare for the preferred airline.")
-
-    amadeus_client = get_amadeus_client()
-    with st.spinner("Querying Amadeus for flights..."):
-        amadeus_fare_per_person = get_average_roundtrip_fare(
-            amadeus_client,
-            origin=departure_airport,
-            destination=destination_airport,
-            dep=departure_date,
-            ret=return_date,
-            travelers=travelers,
-            preferred_airline=preferred_airline,
-        )
-
-    if amadeus_fare_per_person is None:
-        st.error(
-            "Unable to retrieve pricing from Amadeus. "
-            "Please double-check airports, dates, and that your Production API keys are active. "
-            "If the problem persists, use manual flight pricing."
-        )
-        flight_mode = "Enter manually"  # fall back to manual
-else:
-    st.info("You can enter the estimated round-trip flight cost per person manually.")
-
+manual_flight_cost_per_person = 0.0
 if flight_mode == "Enter manually":
     manual_flight_cost_per_person = st.number_input(
         "Manual flight cost per person (round trip, USD)",
         min_value=0.0,
-        value=0.0,
-        step=50.0,
-        format="%.2f",
-    )
-
-# -------------------- Section 4: Hotel ---------------------------------------
-
-st.subheader("4. Hotel (preferred brand)")
-
-hotel_mode = st.radio(
-    "How should we calculate hotel?",
-    options=["Use Amadeus hotel average (preferred brand)", "Enter manually"],
-    index=0,
-)
-
-amadeus_nightly_rate = None
-manual_hotel_rate = None
-
-# Use destination airport as cityCode; for many U.S. markets, this works.
-city_code_for_hotels = destination_airport.upper().strip()
-
-if hotel_mode == "Use Amadeus hotel average (preferred brand)":
-    st.info(
-        "Will query Amadeus for hotels in the destination city and average nightly rate "
-        f"for {preferred_hotel_brand} brands."
-    )
-    amadeus_client = get_amadeus_client()
-    with st.spinner("Querying Amadeus for hotels..."):
-        amadeus_nightly_rate = get_average_hotel_nightly_rate(
-            amadeus_client,
-            city_code=city_code_for_hotels,
-            check_in=departure_date,
-            check_out=return_date,
-            preferred_brand=preferred_hotel_brand,
-        )
-
-    if amadeus_nightly_rate is None:
-        st.error(
-            "Unable to retrieve hotel pricing from Amadeus. "
-            "You can switch to 'Enter manually' to provide a nightly rate."
-        )
-        hotel_mode = "Enter manually"
-
-if hotel_mode == "Enter manually":
-    manual_hotel_rate = st.number_input(
-        "Manual nightly hotel rate (USD)",
-        min_value=0.0,
-        value=110.0,
         step=10.0,
-        format="%.2f",
-    )
-
-# -------------------- Section 5: Meals (GSA per diem – M&IE only) ------------
-
-st.subheader("5. Meals (GSA Per Diem – M&IE only)")
-
-meals_per_diem = None
-if zip_code:
-    with st.spinner("Querying GSA per diem (meals only)..."):
-        meals_per_diem = get_gsa_meals_per_diem(zip_code, departure_date)
-
-if meals_per_diem is not None:
-    st.caption(
-        f"Using GSA M&IE per diem for ZIP {zip_code} and fiscal year "
-        f"{departure_date.year + 1 if departure_date.month >= 10 else departure_date.year}."
+        value=0.0,
     )
 else:
-    st.warning(
-        "Unable to retrieve meals per diem from GSA (missing or unrecognized ZIP). "
-        "Meals will be treated as $0 unless you add them into 'Other fixed costs'."
-    )
+    st.info("Will query Amadeus for an average round-trip fare for the preferred airline.")
 
-# -------------------- Calculate ------------------------------------------------
+
+# --------- 2.4 Hotel (preferred brand) ---------
+st.subheader("4. Hotel (preferred brand)")
+
+st.info(
+    "This tool always uses Amadeus hotel data for nightly rates. "
+    "If Amadeus cannot provide hotel pricing, the hotel portion will be $0 "
+    "and a warning message will be shown in the summary."
+)
+
+# NOTE: Manual nightly rate input has been **removed** per your request.
+
+
+# --------- 2.5 Meals (GSA per diem – M&IE only) ---------
+st.subheader("5. Meals (GSA Per Diem – M&IE only)")
+
+st.caption("Uses GSA M&IE per diem for the client ZIP, multiplied by number of travelers and days.")
+
+
+# =========================
+# 3. Calculation
+# =========================
 
 if st.button("Calculate trip cost"):
-    # Flights
-    if flight_mode == "Use Amadeus average (preferred airline)" and amadeus_fare_per_person is not None:
-        flight_per_person = amadeus_fare_per_person
-        flight_source = "Amadeus"
-    else:
-        flight_per_person = manual_flight_cost_per_person or 0.0
-        flight_source = "Manual"
+    # 3.1 Basic validation
+    if not departure_airport or not destination_airport:
+        st.error("Please provide both departure and destination airports.")
+        st.stop()
 
-    flights_total = flight_per_person * travelers
+    if not departure_date or not return_date:
+        st.error("Please choose both departure and return dates.")
+        st.stop()
 
-    # Hotel
-    if hotel_mode == "Use Amadeus hotel average (preferred brand)" and amadeus_nightly_rate is not None:
-        nightly_rate = amadeus_nightly_rate
-        hotel_source = "Amadeus"
-    else:
-        nightly_rate = manual_hotel_rate or 0.0
-        hotel_source = "Manual"
+    trip_days, trip_nights = trip_day_counts(departure_date, return_date)
 
-    hotel_total = nightly_rate * hotel_nights * travelers
+    if trip_days <= 0:
+        st.error("Trip length must be at least one day. Check your dates.")
+        st.stop()
 
-    # Meals
-    per_diem_meals = meals_per_diem or 0.0
-    meals_total = per_diem_meals * trip_days * travelers
+    # Airline code mapping
+    airline_map = {
+        "JetBlue": "B6",
+        "Delta": "DL",
+        "Southwest": "WN",
+        "American": "AA",
+    }
+    preferred_airline_code = airline_map.get(preferred_airline_label, "")
 
-    # Rental car
-    rental_total = 0.0
-    daily_rental_rate = 0.0
-    if include_rental:
-        daily_rental_rate = estimate_hertz_suv_daily_rate(city, state)
-        rental_total = daily_rental_rate * hotel_nights
+    # 3.2 Amadeus client
+    amadeus = load_amadeus_client()
 
-    # Grand total
-    grand_total = flights_total + hotel_total + meals_total + rental_total + other_fixed_costs
+    # 3.3 Flights
+    flights_total = 0.0
+    flight_detail = ""
+    flight_error = None
 
-    # -------------------- Summary ---------------------------------------------
-
-    st.subheader("Trip cost summary")
-
-    route_str = f"{departure_airport} → {destination_airport}"
-    dates_str = f"{departure_date.isoformat()} to {return_date.isoformat()}"
-
-    st.write(f"**Auditor(s):** {auditor_name or 'N/A'}")
-    st.write(f"**Travelers:** {travelers}")
-    st.write(f"**Route:** {route_str}")
-    st.write(f"**Dates:** {dates_str} ({trip_days} day(s), {hotel_nights} night(s))")
-
-    st.markdown("---")
-
-    st.write(
-        f"**Flights total** ({travelers} × {flight_per_person:,.2f} via {flight_source}): "
-        f"{flights_total:,.2f}"
-    )
-
-    st.write(
-        f"**Hotel total** ({travelers} rooms × {hotel_nights} night(s) × "
-        f"{nightly_rate:,.2f}/night via {hotel_source}): "
-        f"{hotel_total:,.2f}"
-    )
-
-    st.write(
-        f"**Meals total** ({travelers} traveler(s) × {trip_days} day(s) × "
-        f"{per_diem_meals:,.2f}/day): {meals_total:,.2f}"
-    )
-
-    if include_rental:
-        st.write(
-            f"**Rental car total** ({hotel_nights} day(s) × {daily_rental_rate:,.2f}/day, "
-            f"Hertz SUV w/ membership pricing): {rental_total:,.2f}"
+    if flight_mode == "Enter manually":
+        flights_total = manual_flight_cost_per_person * num_travelers
+        flight_detail = (
+            f"{num_travelers} traveler(s) × ${manual_flight_cost_per_person:,.2f} "
+            f"(manual round trip)"
         )
     else:
-        st.write("**Rental car total:** $0.00 (no rental selected)")
+        if not amadeus:
+            flight_error = "Amadeus client is not available; cannot price flights."
+        else:
+            avg_price, err = get_average_flight_price(
+                amadeus,
+                departure_airport,
+                destination_airport,
+                departure_date,
+                return_date,
+                num_travelers,
+                preferred_airline_code,
+            )
+            if err:
+                flight_error = err
+            elif avg_price is not None:
+                flights_total = avg_price * num_travelers
+                flight_detail = (
+                    f"{num_travelers} traveler(s) × ${avg_price:,.2f} "
+                    f"(Amadeus avg for {preferred_airline_label})"
+                )
+            else:
+                flight_error = "Amadeus did not return a usable flight price."
 
-    st.write(f"**Other fixed costs:** {other_fixed_costs:,.2f}")
+    # 3.4 Hotel (Amadeus only, per traveler room)
+    hotel_total = 0.0
+    hotel_detail = ""
+    hotel_error = None
+
+    if amadeus:
+        nightly_rate, err = get_average_hotel_nightly_rate(
+            amadeus,
+            destination_airport,
+            departure_date,
+            return_date,
+            preferred_hotel_brand,
+        )
+        if err:
+            hotel_error = err
+        elif nightly_rate is not None:
+            hotel_total = nightly_rate * trip_nights * num_travelers
+            hotel_detail = (
+                f"{num_travelers} rooms × {trip_nights} night(s) × "
+                f"${nightly_rate:,.2f}/night (Amadeus avg for {preferred_hotel_brand})"
+            )
+        else:
+            hotel_error = "Amadeus did not return a usable hotel rate."
+    else:
+        hotel_error = "Amadeus client is not available; cannot price hotels."
+
+    # 3.5 Meals (GSA per diem M&IE)
+    meals_total = 0.0
+    meals_detail = ""
+    meals_error = None
+
+    travel_year = departure_date.year
+    zip_for_gsa = extract_zip_from_address(client_office_address)
+
+    daily_mie, mie_err = lookup_gsa_meal_rate(zip_for_gsa, travel_year)
+    if mie_err:
+        meals_error = mie_err
+    else:
+        meals_total = daily_mie * trip_days * num_travelers
+        meals_detail = (
+            f"{num_travelers} traveler(s) × {trip_days} day(s) × "
+            f"${daily_mie:,.2f}/day (GSA M&IE ZIP {zip_for_gsa})"
+        )
+
+    # 3.6 Hertz rental car (automatic)
+    rental_total = 0.0
+    rental_detail = ""
+
+    if include_rental:
+        daily_rate = estimate_hertz_daily_rate(destination_airport)
+        rental_total = daily_rate * trip_days
+        rental_detail = (
+            f"{trip_days} day(s) × ${daily_rate:,.2f}/day (Hertz SUV, "
+            f"membership-adjusted estimate)"
+        )
+
+    # 3.7 Grand total
+    grand_total = flights_total + hotel_total + meals_total + rental_total + other_fixed_costs
+
+    # =========================
+    # 4. Output
+    # =========================
+
+    st.markdown("---")
+    st.subheader("Trip cost summary")
+
+    if auditor_name:
+        st.write(f"**Auditor(s):** {auditor_name}")
+    else:
+        st.write("**Auditor(s):** N/A")
+
+    st.write(f"**Travelers:** {num_travelers}")
+    st.write(f"**Route:** {departure_airport} → {destination_airport}")
+    st.write(
+        f"**Dates:** {departure_date.isoformat()} to {return_date.isoformat()} "
+        f"({trip_days} day(s), {trip_nights} night(s))"
+    )
+
+    st.markdown("### Line items")
+
+    # Flights
+    if flight_error:
+        st.error(f"Flights not included: {flight_error}")
+    else:
+        st.write(f"**Flights total:** ${flights_total:,.2f}")
+        if flight_detail:
+            st.caption(f"▪ {flight_detail}")
+
+    # Hotel
+    if hotel_error:
+        st.error(f"Hotel not included: {hotel_error}")
+    else:
+        st.write(f"**Hotel total:** ${hotel_total:,.2f}")
+        if hotel_detail:
+            st.caption(f"▪ {hotel_detail}")
+
+    # Meals
+    if meals_error:
+        st.error(
+            f"Meals not included (treated as $0 in total): {meals_error}"
+        )
+    else:
+        st.write(f"**Meals total:** ${meals_total:,.2f}")
+        if meals_detail:
+            st.caption(f"▪ {meals_detail}")
+
+    # Rental car
+    if include_rental:
+        st.write(f"**Rental car total:** ${rental_total:,.2f}")
+        if rental_detail:
+            st.caption(f"▪ {rental_detail}")
+    else:
+        st.write("**Rental car total:** $0.00 (not included)")
+
+    # Other fixed costs
+    st.write(f"**Other fixed costs:** ${other_fixed_costs:,.2f}")
 
     st.markdown("### Grand total")
-    st.markdown(f"## ${grand_total:,.2f}")
+    st.success(f"**${grand_total:,.2f}**")
+
+    # Small note about data sources
+    st.caption(
+        "Notes: Flights & hotels use Amadeus Production APIs where available. "
+        "Meals use GSA M&IE per diem by ZIP. Hertz daily rate is a smart internal "
+        "estimate adjusted for membership, market, and SUV preference."
+    )
