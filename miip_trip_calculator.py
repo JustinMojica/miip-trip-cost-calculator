@@ -28,7 +28,6 @@ AIRLINE_CODES = {
     "American": "AA",
 }
 
-
 def fetch_roundtrip_flight_avg(
     origin: str,
     destination: str,
@@ -65,7 +64,7 @@ def fetch_roundtrip_flight_avg(
                 total = float(offer["price"]["grandTotal"])
                 prices.append(total)
             except Exception:
-            # Skip any malformed offers
+                # Skip malformed offers
                 continue
 
         if not prices:
@@ -82,9 +81,6 @@ def fetch_roundtrip_flight_avg(
 # Hotels: smart estimates (no API)
 # Business-realistic per-airport nightly rates
 # -----------------------------------------------------------------------------
-# These are *estimate* corporate nightly rates (before tax/fees) for
-# typical Marriott/Hilton/Wyndham-type properties near each airport.
-# You can tweak any single airport later if you see consistent differences.
 HOTEL_BASE_RATE_BY_AIRPORT = {
     # Northeast / NYC / Boston
     "BOS": 260.0,
@@ -202,8 +198,7 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "FAI": 240.0,
 }
 
-# Default if airport is not specifically in the table.
-DEFAULT_HOTEL_NIGHTLY_RATE = 190.0
+DEFAULT_HOTEL_NIGHTLY_RATE = 190.0  # fallback
 
 
 def estimate_hotel_nightly_rate(dest_airport: str) -> float:
@@ -217,7 +212,6 @@ def estimate_hotel_nightly_rate(dest_airport: str) -> float:
 
 # -----------------------------------------------------------------------------
 # Hertz rental car: smart estimates (membership-adjusted, hidden)
-# Business-realistic daily rates per airport
 # -----------------------------------------------------------------------------
 HERTZ_BASE_DAILY_BY_AIRPORT = {
     # Northeast / NYC / Boston
@@ -342,7 +336,6 @@ HERTZ_DEFAULT_BASE_DAILY = 80.0
 HERTZ_SUV_UPLIFT = 0.15           # SUVs cost ~15% more than compact.
 HERTZ_MEMBERSHIP_DISCOUNT = 0.12  # 12% off for your corporate/membership rate.
 
-
 def estimate_hertz_suv_daily_rate(dest_airport: str) -> float:
     """
     Smart Hertz SUV daily rate estimate with membership discount baked in.
@@ -396,7 +389,6 @@ MID_TIER_AIRPORTS = {
     "SLC", "ABQ",
 }
 
-
 def estimate_meal_rate_per_day(dest_airport: str) -> float:
     """
     Meal formula:
@@ -416,12 +408,19 @@ def estimate_meal_rate_per_day(dest_airport: str) -> float:
 
 
 # -----------------------------------------------------------------------------
+# Checked baggage: always included
+# -----------------------------------------------------------------------------
+# You requested: 1 flier = 1 bag = $40, 2 fliers = $80, etc.
+# We'll interpret that as **$40 per traveler per round trip**.
+CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP = 40.0  # USD
+
+
+# -----------------------------------------------------------------------------
 # Trip calculations
 # -----------------------------------------------------------------------------
 def calc_trip_days(depart: date, ret: date) -> int:
     delta = (ret - depart).days
     return max(delta + 1, 1)
-
 
 def calc_trip_nights(depart: date, ret: date) -> int:
     # Nights are usually one less than days, but never < 0.
@@ -434,7 +433,7 @@ def calc_trip_nights(depart: date, ret: date) -> int:
 st.set_page_config(page_title="MIIP Trip Cost Calculator", layout="wide")
 
 st.title("MIIP Trip Cost Calculator")
-st.caption("Automatic estimate of flights, hotel, meals, and Hertz car costs for audit trips.")
+st.caption("Automatic estimate of flights, baggage, hotel, meals, and Hertz car costs for audit trips.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Traveler & flights
@@ -534,9 +533,9 @@ trip_days = calc_trip_days(departure_date, return_date)
 trip_nights = calc_trip_nights(departure_date, return_date)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Flights
+# 3. Flights (with mandatory checked baggage)
 # ─────────────────────────────────────────────────────────────────────────────
-st.header("3. Flights (preferred airline)")
+st.header("3. Flights (preferred airline + checked bags)")
 
 flight_mode = st.radio(
     "How should we calculate flights?",
@@ -550,6 +549,11 @@ manual_flight_cost = st.number_input(
     step=50.0,
     value=0.0,
     help="Only used if 'Enter manually' is selected.",
+)
+
+st.caption(
+    f"Checked bags are always included: "
+    f"**${CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP:,.2f} per traveler (round trip)**."
 )
 
 flight_cost_per_person = 0.0
@@ -610,13 +614,13 @@ dest_upper = destination_airport.upper()
 
 if dest_upper in EXPENSIVE_AIRPORTS:
     st.info(
-        f"{dest_upper} is treated as a **high-cost city** (Boston/NYC/LA/SF/DC/etc). "
-        f"Base $100/day increased by 25%."
+        f"{dest_upper} is treated as a **high-cost city** "
+        f"(Boston/NYC/LA/SF/DC/etc). Base $100/day increased by 25%."
     )
 elif dest_upper in MID_TIER_AIRPORTS:
     st.info(
-        f"{dest_upper} is treated as a **mid-tier city** (Austin, Denver, Charlotte, etc.). "
-        f"Base $100/day increased by 10%."
+        f"{dest_upper} is treated as a **mid-tier city** "
+        f"(Austin, Denver, Charlotte, etc.). Base $100/day increased by 10%."
     )
 else:
     st.info("Destination treated as a standard-cost city with a base $100/day meal rate.")
@@ -657,10 +661,18 @@ st.header("7. Trip cost summary")
 if date_error:
     st.error("Cannot calculate totals until the date error above is fixed.")
 else:
+    # Airfare (excluding bags)
     flights_total = flight_cost_per_person * travelers
+
+    # Checked baggage – always included
+    bags_total = travelers * CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP
+
+    # Hotel & meals
     hotel_total = hotel_nightly_rate * trip_nights * travelers
+
     grand_total = (
         flights_total
+        + bags_total
         + hotel_total
         + meals_total
         + rental_car_total
@@ -677,7 +689,7 @@ else:
     st.write(f"**Travelers:** {travelers}")
 
     st.write("---")
-    st.write(f"**Flights total:** ${flights_total:,.2f}")
+    st.write(f"**Flights total (tickets only):** ${flights_total:,.2f}")
     if flight_cost_per_person > 0:
         st.caption(
             f"{travelers} traveler(s) × ${flight_cost_per_person:,.2f} "
@@ -685,6 +697,12 @@ else:
         )
     else:
         st.caption("Flights treated as $0 (no price available).")
+
+    st.write(f"**Checked bags total:** ${bags_total:,.2f}")
+    st.caption(
+        f"{travelers} traveler(s) × "
+        f"${CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP:,.2f} per traveler (round trip)."
+    )
 
     st.write(f"**Hotel total:** ${hotel_total:,.2f}")
     st.caption(
@@ -716,6 +734,7 @@ else:
 
     st.caption(
         "Notes: Flights use Amadeus Production APIs where available. "
+        "Checked baggage is automatically added at $40 per traveler per round trip. "
         "Hotels use business-realistic nightly estimates by destination airport. "
         "Meals use a $100/day base with +25% for expensive cities and +10% for mid-tier cities. "
         "Hertz rental car prices are smart membership-adjusted estimates for SUVs."
