@@ -300,12 +300,9 @@ with col_right:
     preferred_hotel_brand = st.selectbox("Preferred hotel brand", ["Marriott", "Hilton", "Wyndham"])
     st.markdown("</div>", unsafe_allow_html=True)
 
-# Blue info box under sections 1 & 2
-st.info("Fill out traveler, route, and client/hotel info above, then continue with dates, ground costs, and flights below.")
-
 col_dates, col_ground = st.columns(2)
 
-# Dates with MM/DD/YYYY format; always enabled & working
+# Dates with MM/DD/YYYY format
 today = dt.date.today()
 
 with col_dates:
@@ -470,7 +467,7 @@ if can_calculate:
 
     st.write("")
     st.write("**Cost components**")
-    st.write(f"- Flights total (tickets): **${flights_total:,.0f}**")
+    st.write(f"- Flights total: **${flights_total:,.0f}**")
     st.write(f"- Checked bags total: **${bags_total:,.0f}**")
     st.write(f"- Hotel total: **${hotel_total:,.0f}**")
     st.write(f"- Meals total: **${meals_total:,.0f}**")
@@ -572,4 +569,3 @@ if can_calculate:
         st.markdown('</div>', unsafe_allow_html=True)
 else:
     st.info("Select valid departure and return dates to see the full trip cost breakdown and totals.")
-
