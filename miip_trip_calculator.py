@@ -204,65 +204,78 @@ def get_average_round_trip_fare(
     """Return an average RT fare per traveler in USD.
 
     Strategy:
-    1. Try with the preferred airline (includedAirlineCodes).
-    2. If no usable prices, retry without airline filter (any airline).
+    - Query Amadeus once for all airlines.
+    - If there are offers whose validating airline matches the preferred airline,
+      average only those.
+    - Otherwise, average across all returned offers.
     """
 
-    airline_code = AIRLINE_CODES.get(airline_name)
+    preferred_code = AIRLINE_CODES.get(airline_name)
 
-    def _fetch_offers(params: dict) -> List[float]:
+    try:
+        response = amadeus_client.shopping.flight_offers_search.get(
+            originLocationCode=origin,
+            destinationLocationCode=dest,
+            departureDate=departure_date.isoformat(),
+            returnDate=return_date.isoformat(),
+            adults=1,
+            currencyCode="USD",
+            max=20,
+        )
+        offers = response.data
+    except ResponseError as error:
+        st.error("Amadeus flight search failed. You can switch to manual flight entry.")
+        st.caption(str(error))
+        return None
+    except Exception as error:
+        st.error("Unexpected error while calling Amadeus. You can switch to manual flight entry.")
+        st.caption(str(error))
+        return None
+
+    if not offers:
+        st.error("Amadeus returned no offers for this route/dates. You can enter flights manually.")
+        return None
+
+    prices_all: List[float] = []
+    prices_preferred: List[float] = []
+
+    for offer in offers:
         try:
-            response = amadeus_client.shopping.flight_offers_search.get(**params)
-            offers = response.data
-        except ResponseError as error:
-            st.error("Amadeus flight search failed. You can switch to manual flight entry.")
-            st.caption(str(error))
-            return []
-        except Exception as error:
-            st.error("Unexpected error while calling Amadeus. You can switch to manual flight entry.")
-            st.caption(str(error))
-            return []
+            price = float(offer["price"]["grandTotal"])
+        except Exception:
+            continue
 
-        prices: List[float] = []
-        for offer in offers:
-            try:
-                price = float(offer["price"]["grandTotal"])
-                prices.append(price)
-            except Exception:
-                continue
-        return prices
+        prices_all.append(price)
 
-    base_params = dict(
-        originLocationCode=origin,
-        destinationLocationCode=dest,
-        departureDate=departure_date.isoformat(),
-        returnDate=return_date.isoformat(),
-        adults=1,
-        currencyCode="USD",
-        max=20,
-    )
+        if preferred_code:
+            # Try to infer validating airline code(s)
+            validating_codes = offer.get("validatingAirlineCodes") or offer.get("validatingAirlineCode")
+            if isinstance(validating_codes, list):
+                if preferred_code in validating_codes:
+                    prices_preferred.append(price)
+            elif isinstance(validating_codes, str):
+                if validating_codes == preferred_code:
+                    prices_preferred.append(price)
 
-    prices: List[float] = []
-
-    # 1) Try with preferred airline, if we know its code
-    if airline_code:
-        params_with_airline = {**base_params, "includedAirlineCodes": airline_code}
-        prices = _fetch_offers(params_with_airline)
-
-    # 2) If no usable prices, try again with ANY airline
-    if not prices:
-        prices = _fetch_offers(base_params)
-        if prices:
-            st.warning(
-                "No usable prices found for the preferred airline only; "
-                "using average of available airlines instead."
-            )
-
-    if not prices:
+    if not prices_all:
         st.error("Amadeus returned no usable prices for this route/dates. You can enter flights manually.")
         return None
 
-    return round(mean(prices), 2)
+    if prices_preferred:
+        avg_price = round(mean(prices_preferred), 2)
+        st.caption(
+            f"Estimated average round-trip fare per traveler for **{airline_name}**: "
+            f"**${avg_price:,.0f}**."
+        )
+    else:
+        avg_price = round(mean(prices_all), 2)
+        st.caption(
+            "Estimated average round-trip fare per traveler based on all available airlines "
+            f"(no specific offers found for {airline_name}). "
+            f"Average used: **${avg_price:,.0f}**."
+        )
+
+    return avg_price
 
 
 # ---------------------------------------------------------
@@ -355,7 +368,7 @@ st.markdown('<div class="miip-section-title">5. Flights</div>', unsafe_allow_htm
 
 flight_pricing_mode = st.radio(
     "Flight pricing mode",
-    ("Use Amadeus average (preferred airline)", "Enter manually"),
+    ("Use Amadeus average (preferred airline where available)", "Enter manually"),
     index=0,
 )
 
@@ -387,7 +400,6 @@ else:
             )
             if avg_fare is not None:
                 flight_cost_per_person = avg_fare
-                st.caption(f"Estimated average round-trip fare per traveler: **${avg_fare:,.0f}**.")
     else:
         st.caption("Enter a valid destination airport and dates to estimate flights via Amadeus.")
 
@@ -490,8 +502,7 @@ if can_calculate:
 
         st.markdown("#### Flights")
         st.markdown(
-            f"- Average round-trip fare per traveler: **${flight_cost_per_person:,.2f}**  "
-            "_(manual entry or Amadeus average)_"
+            f"- Average round-trip fare per traveler: **${flight_cost_per_person:,.2f}**"
         )
         st.markdown(
             f"- Flights total: `${flight_cost_per_person:,.2f} × {travelers}`"
