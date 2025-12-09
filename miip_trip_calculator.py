@@ -65,7 +65,6 @@ def fetch_roundtrip_flight_avg(
                 total = float(offer["price"]["grandTotal"])
                 prices.append(total)
             except Exception:
-                # Skip malformed offers
                 continue
 
         if not prices:
@@ -80,7 +79,6 @@ def fetch_roundtrip_flight_avg(
 
 # -----------------------------------------------------------------------------
 # Hotels: smart estimates (no API)
-# Business-realistic per-airport nightly rates
 # -----------------------------------------------------------------------------
 HOTEL_BASE_RATE_BY_AIRPORT = {
     # Northeast / NYC / Boston
@@ -92,7 +90,6 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "PVD": 185.0,
     "ALB": 175.0,
     "PWM": 190.0,
-
     # Mid-Atlantic / DC / Philly / Baltimore
     "DCA": 260.0,
     "IAD": 260.0,
@@ -100,14 +97,12 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "PHL": 220.0,
     "RIC": 185.0,
     "ORF": 185.0,
-
     # New York State / NJ (non-NYC)
     "BUF": 170.0,
     "ROC": 165.0,
     "SYR": 165.0,
     "HPN": 240.0,
     "SWF": 180.0,
-
     # Southeast big hubs
     "ATL": 210.0,
     "CLT": 195.0,
@@ -115,7 +110,6 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "BNA": 200.0,
     "CHS": 200.0,
     "GSP": 175.0,
-
     # Florida
     "MIA": 260.0,
     "FLL": 220.0,
@@ -127,7 +121,6 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "SRQ": 195.0,
     "ECP": 185.0,
     "PNS": 185.0,
-
     # Midwest / Great Lakes
     "ORD": 260.0,
     "MDW": 230.0,
@@ -143,7 +136,6 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "DSM": 170.0,
     "MCI": 185.0,
     "OMA": 180.0,
-
     # Texas
     "DFW": 195.0,
     "DAL": 185.0,
@@ -152,7 +144,6 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "AUS": 220.0,
     "SAT": 190.0,
     "ELP": 175.0,
-
     # West Coast / California
     "LAX": 280.0,
     "BUR": 250.0,
@@ -165,13 +156,11 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "SMF": 210.0,
     "PSP": 240.0,
     "ONT": 210.0,
-
     # Pacific Northwest
     "SEA": 260.0,
     "PDX": 220.0,
     "GEG": 185.0,
     "BOI": 185.0,
-
     # Mountain / Rockies
     "DEN": 230.0,
     "SLC": 200.0,
@@ -179,17 +168,14 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "ABQ": 180.0,
     "BZN": 230.0,
     "JAC": 250.0,
-
     # Desert / Southwest
     "PHX": 210.0,
     "TUS": 185.0,
     "LAS": 220.0,
     "RNO": 195.0,
-
     # West / Other
     "FAT": 190.0,
     "RAP": 180.0,
-
     # Hawaii / Alaska
     "HNL": 320.0,
     "OGG": 340.0,
@@ -203,10 +189,7 @@ DEFAULT_HOTEL_NIGHTLY_RATE = 190.0  # fallback
 
 
 def estimate_hotel_nightly_rate(dest_airport: str) -> float:
-    """
-    Smart nightly estimate based on destination airport.
-    Falls back to DEFAULT_HOTEL_NIGHTLY_RATE only if not in the table.
-    """
+    """Smart nightly estimate based on destination airport."""
     dest_airport = (dest_airport or "").upper().strip()
     return HOTEL_BASE_RATE_BY_AIRPORT.get(dest_airport, DEFAULT_HOTEL_NIGHTLY_RATE)
 
@@ -224,7 +207,6 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "PVD": 78.0,
     "ALB": 78.0,
     "PWM": 82.0,
-
     # Mid-Atlantic / DC / Philly / Baltimore
     "DCA": 100.0,
     "IAD": 98.0,
@@ -232,14 +214,12 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "PHL": 92.0,
     "RIC": 80.0,
     "ORF": 80.0,
-
     # New York State / NJ (non-NYC)
     "BUF": 78.0,
     "ROC": 76.0,
     "SYR": 76.0,
     "HPN": 90.0,
     "SWF": 78.0,
-
     # Southeast big hubs
     "ATL": 90.0,
     "CLT": 85.0,
@@ -247,7 +227,6 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "BNA": 86.0,
     "CHS": 88.0,
     "GSP": 80.0,
-
     # Florida
     "MIA": 95.0,
     "FLL": 88.0,
@@ -259,7 +238,6 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "SRQ": 82.0,
     "ECP": 76.0,
     "PNS": 76.0,
-
     # Midwest / Great Lakes
     "ORD": 95.0,
     "MDW": 92.0,
@@ -275,7 +253,6 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "DSM": 78.0,
     "MCI": 80.0,
     "OMA": 80.0,
-
     # Texas
     "DFW": 86.0,
     "DAL": 84.0,
@@ -284,7 +261,6 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "AUS": 90.0,
     "SAT": 84.0,
     "ELP": 78.0,
-
     # West Coast / California
     "LAX": 105.0,
     "BUR": 98.0,
@@ -297,13 +273,11 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "SMF": 88.0,
     "PSP": 96.0,
     "ONT": 88.0,
-
     # Pacific Northwest
     "SEA": 95.0,
     "PDX": 88.0,
     "GEG": 80.0,
     "BOI": 80.0,
-
     # Mountain / Rockies
     "DEN": 95.0,
     "SLC": 88.0,
@@ -311,17 +285,14 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "ABQ": 80.0,
     "BZN": 90.0,
     "JAC": 98.0,
-
     # Desert / Southwest
     "PHX": 90.0,
     "TUS": 82.0,
     "LAS": 90.0,
     "RNO": 84.0,
-
     # West / Other
     "FAT": 82.0,
     "RAP": 80.0,
-
     # Hawaii / Alaska
     "HNL": 110.0,
     "OGG": 112.0,
@@ -332,21 +303,17 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
 }
 
 HERTZ_DEFAULT_BASE_DAILY = 80.0
-
-# Hidden knobs – realistic + conservative.
-HERTZ_SUV_UPLIFT = 0.15           # SUVs cost ~15% more than compact.
-HERTZ_MEMBERSHIP_DISCOUNT = 0.12  # 12% off for your corporate/membership rate.
+HERTZ_SUV_UPLIFT = 0.15          # SUVs cost ~15% more than compact.
+HERTZ_MEMBERSHIP_DISCOUNT = 0.12  # Hidden corporate discount.
 
 
 def estimate_hertz_suv_daily_rate(dest_airport: str) -> float:
     """
     Smart Hertz SUV daily rate estimate with membership discount baked in.
-    The auditors will ONLY see the final daily rate, not the discount %.
+    Auditors only see the final daily rate.
     """
     dest_airport = (dest_airport or "").upper().strip()
     base = HERTZ_BASE_DAILY_BY_AIRPORT.get(dest_airport, HERTZ_DEFAULT_BASE_DAILY)
-
-    # Apply SUV uplift, then apply hidden membership discount.
     suv_price = base * (1.0 + HERTZ_SUV_UPLIFT)
     membership_adjusted = suv_price * (1.0 - HERTZ_MEMBERSHIP_DISCOUNT)
     return round(membership_adjusted, 2)
@@ -357,7 +324,6 @@ def estimate_hertz_suv_daily_rate(dest_airport: str) -> float:
 # -----------------------------------------------------------------------------
 BASE_MEAL_RATE = 100.0  # USD per traveler per day
 
-# +25% expensive markets
 EXPENSIVE_AIRPORTS = {
     # Boston / NYC
     "BOS", "JFK", "LGA", "EWR",
@@ -373,11 +339,10 @@ EXPENSIVE_AIRPORTS = {
     "MIA", "FLL",
     # Hawaii
     "HNL", "OGG", "KOA", "LIH",
-    # Denver (high cost of dining)
+    # Denver
     "DEN",
 }
 
-# +10% mid-tier markets
 MID_TIER_AIRPORTS = {
     # East / Southeast
     "PHL", "BWI", "CLT", "RDU", "BNA", "ATL", "MCO", "TPA", "RSW", "PBI",
@@ -413,9 +378,6 @@ def estimate_meal_rate_per_day(dest_airport: str) -> float:
 # -----------------------------------------------------------------------------
 # Checked baggage: smart airline + domestic logic
 # -----------------------------------------------------------------------------
-# Domestic bag fee per traveler, round-trip, assuming 1 checked bag:
-# - Southwest: 0 (2 free bags)
-# - JetBlue / Delta / American: ~ $70 per traveler round trip
 DOMESTIC_BAG_FEE_BY_AIRLINE = {
     "Southwest": 0.0,
     "JetBlue": 70.0,
@@ -423,14 +385,12 @@ DOMESTIC_BAG_FEE_BY_AIRLINE = {
     "American": 70.0,
 }
 
-# Use all airports we know about from hotel/rental tables as "US airports",
-# plus MHT which is in your UI but not in those dicts.
 US_AIRPORTS = set(HOTEL_BASE_RATE_BY_AIRPORT.keys()) | set(HERTZ_BASE_DAILY_BY_AIRPORT.keys())
 US_AIRPORTS.add("MHT")
 
 
 def is_domestic_route(origin: str, dest: str) -> bool:
-    """A simple heuristic: if both airports are in our US list, treat as domestic."""
+    """Heuristic: if both airports are in our US list, treat as domestic."""
     o = (origin or "").upper().strip()
     d = (dest or "").upper().strip()
     return o in US_AIRPORTS and d in US_AIRPORTS
@@ -443,13 +403,12 @@ def estimate_bag_fee_total(
     travelers: int,
 ) -> float:
     """
-    Smart checked-bag fee:
+    Smart checked-bag fee (always included):
       - If domestic:
           Southwest -> 0 per traveler
           JetBlue/Delta/American -> ~70 per traveler (round trip)
-          Others -> fallback ~70 per traveler
-      - If not domestic:
-          assume 0 (most intl itineraries include 1 checked bag)
+          Others -> ~70 per traveler
+      - If not domestic: assume 0
     """
     if is_domestic_route(origin, dest):
         per_traveler = DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70.0)
@@ -468,7 +427,6 @@ def calc_trip_days(depart: date, ret: date) -> int:
 
 
 def calc_trip_nights(depart: date, ret: date) -> int:
-    # Nights are usually one less than days, but never < 0.
     return max((ret - depart).days, 0)
 
 
@@ -478,7 +436,7 @@ def calc_trip_nights(depart: date, ret: date) -> int:
 st.set_page_config(page_title="MIIP Trip Cost Calculator", layout="wide")
 
 st.title("MIIP Trip Cost Calculator")
-st.caption("Automatic estimate of flights, baggage, hotel, meals, and Hertz car costs for audit trips.")
+st.caption("Estimate flights, baggage, hotel, meals, and Hertz car costs for audit trips.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Traveler & flights
@@ -488,8 +446,6 @@ st.header("Traveler & flights")
 col_a, col_b = st.columns(2)
 
 with col_a:
-    auditor_name = st.text_input("Auditor name", value="")
-
     travelers = st.number_input(
         "Number of travelers (each gets their own room)",
         min_value=1,
@@ -514,7 +470,7 @@ with col_b:
     client_address = st.text_input(
         "Client office address",
         value="",
-        help="Currently used only for documentation in this version.",
+        help="For notes / reporting only in this version.",
     )
 
     destination_airport = st.text_input(
@@ -557,7 +513,7 @@ with col_ground:
     include_rental_car = st.checkbox(
         "Include Hertz rental car",
         value=True,
-        help="If checked, the tool will estimate a Hertz SUV rental cost automatically.",
+        help="If checked, the tool estimates a Hertz SUV rental cost automatically.",
     )
 
     other_fixed_costs = st.number_input(
@@ -565,10 +521,9 @@ with col_ground:
         min_value=0.0,
         step=10.0,
         value=0.0,
-        help="Parking, tolls, etc. – if you want to lump them in.",
+        help="Parking, tolls, etc., if you want to lump them in.",
     )
 
-# Basic date validation
 date_error = None
 if return_date <= departure_date:
     date_error = "Return date must be after the departure date."
@@ -598,18 +553,15 @@ manual_flight_cost = st.number_input(
 
 st.caption(
     "Checked bags are automatically included based on airline and whether the route is domestic. "
-    "Example: Southwest often $0 (2 free bags), JetBlue/Delta/American ~ $70 per traveler "
-    "per round trip for one checked bag."
+    "Example: Southwest ≈ $0; JetBlue/Delta/American ≈ $70 per traveler per round trip."
 )
 
 flight_cost_per_person = 0.0
 flight_debug_msg = ""
 
-if date_error:
-    st.warning("Fix the date error above to enable flight pricing.")
-else:
+if not date_error:
     if flight_mode == "Use Amadeus average (preferred airline)":
-        st.info("Will query Amadeus for an average round trip fare for the preferred airline.")
+        st.caption("Querying Amadeus for an average round-trip fare for the preferred airline...")
         avg_price, err = fetch_roundtrip_flight_avg(
             origin=departure_airport,
             destination=destination_airport,
@@ -623,7 +575,7 @@ else:
             flight_cost_per_person = 0.0
         else:
             flight_cost_per_person = avg_price
-            st.success(f"Amadeus average round trip fare (per person): ${avg_price:,.2f}")
+            st.markdown(f"**Amadeus average round-trip fare (per person):** ${avg_price:,.2f}")
     else:
         flight_cost_per_person = manual_flight_cost
         if manual_flight_cost <= 0:
@@ -634,10 +586,9 @@ else:
 # ─────────────────────────────────────────────────────────────────────────────
 st.header("4. Hotel (preferred brand – smart estimate)")
 
-st.info(
+st.caption(
     "Hotel pricing uses a smart nightly estimate based on the destination airport "
-    "and typical rates for your preferred brand. No manual nightly entry and no hotel API "
-    "calls, so it always works."
+    "and typical rates for your preferred brand. No hotel API calls, so it always works."
 )
 
 hotel_nightly_rate = estimate_hotel_nightly_rate(destination_airport)
@@ -651,7 +602,7 @@ st.write(f"- Trip nights: **{trip_nights}**")
 st.write(f"- Travelers / rooms: **{travelers}** (one room per traveler)")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Meals – smart formula (base + uplift by city tier)
+# 5. Meals – smart formula
 # ─────────────────────────────────────────────────────────────────────────────
 st.header("5. Meals (smart estimate)")
 
@@ -659,21 +610,19 @@ meal_rate_per_day = estimate_meal_rate_per_day(destination_airport)
 dest_upper = destination_airport.upper()
 
 if dest_upper in EXPENSIVE_AIRPORTS:
-    st.info(
-        f"{dest_upper} is treated as a **high-cost city** "
-        f"(Boston/NYC/LA/SF/DC/etc). Base $100/day increased by 25%."
+    st.markdown(
+        "_Destination treated as a **high-cost city** (Boston/NYC/LA/SF/DC/etc.). "
+        "Base $100/day increased by 25%._"
     )
 elif dest_upper in MID_TIER_AIRPORTS:
-    st.info(
-        f"{dest_upper} is treated as a **mid-tier city** "
-        f"(Austin, Denver, Charlotte, etc.). Base $100/day increased by 10%."
+    st.markdown(
+        "_Destination treated as a **mid-tier city** (Austin, Denver, Charlotte, etc.). "
+        "Base $100/day increased by 10%._"
     )
 else:
-    st.info("Destination treated as a standard-cost city with a base $100/day meal rate.")
+    st.markdown("_Destination treated as a **standard-cost city** with base $100/day._")
 
-st.write(
-    f"- Meal rate per traveler per day: **${meal_rate_per_day:,.2f}**"
-)
+st.write(f"- Meal rate per traveler per day: **${meal_rate_per_day:,.2f}**")
 meals_total = meal_rate_per_day * trip_days * travelers
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -687,9 +636,8 @@ rental_daily_rate = 0.0
 if include_rental_car:
     rental_daily_rate = estimate_hertz_suv_daily_rate(destination_airport)
     rental_car_total = rental_daily_rate * trip_days
-    st.info(
-        "Using a smart Hertz SUV daily rate estimate with a hidden membership discount "
-        "already applied. Auditors only see the final price."
+    st.caption(
+        "Uses a smart Hertz SUV daily rate estimate with a hidden membership discount already applied."
     )
     st.write(
         f"- Estimated Hertz SUV daily rate near {destination_airport.upper()}: "
@@ -697,7 +645,7 @@ if include_rental_car:
     )
     st.write(f"- Rental days: **{trip_days}**")
 else:
-    st.write("Rental car not included in this estimate.")
+    st.write("- Rental car not included in this estimate.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Final calculation & summary
@@ -707,19 +655,14 @@ st.header("7. Trip cost summary")
 if date_error:
     st.error("Cannot calculate totals until the date error above is fixed.")
 else:
-    # Airfare (excluding bags)
     flights_total = flight_cost_per_person * travelers
-
-    # Checked baggage – smart per-airline/per-route
     bags_total = estimate_bag_fee_total(
         preferred_airline=preferred_airline,
         origin=departure_airport,
         dest=destination_airport,
         travelers=travelers,
     )
-
     hotel_total = hotel_nightly_rate * trip_nights * travelers
-
     grand_total = (
         flights_total
         + bags_total
@@ -751,7 +694,7 @@ else:
     st.write(f"**Checked bags total:** ${bags_total:,.2f}")
     st.caption(
         "Smart bag estimate based on airline and whether the route is domestic. "
-        "Domestic Southwest usually $0; JetBlue/Delta/American ~ $70 per traveler "
+        "Domestic Southwest usually $0; JetBlue/Delta/American ≈ $70 per traveler "
         "per round trip for one checked bag. Non-U.S. routes treated as $0 for bags."
     )
 
@@ -790,4 +733,3 @@ else:
         "Meals use a $100/day base with +25% for expensive cities and +10% for mid-tier cities. "
         "Hertz rental car prices are smart membership-adjusted estimates for SUVs."
     )
-
