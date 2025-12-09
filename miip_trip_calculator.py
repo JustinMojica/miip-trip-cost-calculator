@@ -253,7 +253,7 @@ def get_average_round_trip_fare(
     if not prices:
         prices = _fetch_offers(base_params)
         if prices:
-            st.caption(
+            st.warning(
                 "No usable prices found for the preferred airline only; "
                 "using average of available airlines instead."
             )
@@ -404,39 +404,11 @@ st.caption(bag_route_note)
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 6. Hotel (preferred brand – smart estimate)
+# Hidden calculation for hotel, meals, Hertz (no visible sections)
 # ---------------------------------------------------------
-
-st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
-st.markdown('<div class="miip-section-title">6. Hotel</div>', unsafe_allow_html=True)
 
 hotel_nightly_rate = estimate_hotel_nightly_rate(destination_airport) if destination_airport else DEFAULT_HOTEL_NIGHTLY_RATE
-st.write(
-    f"Nightly estimate near **{destination_airport or 'destination'}** for **{preferred_hotel_brand}**: "
-    f"**${hotel_nightly_rate:,.0f}** / room."
-)
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# 7. Meals (smart estimate)
-# ---------------------------------------------------------
-
-st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
-st.markdown('<div class="miip-section-title">7. Meals</div>', unsafe_allow_html=True)
-
 meal_rate_per_day = estimate_meal_rate_per_day(destination_airport) if destination_airport else BASE_MEAL_RATE
-st.write(
-    f"Meal estimate: **${meal_rate_per_day:,.0f}** per traveler per day "
-    f"for **{destination_airport or 'destination'}**."
-)
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# 8. Hertz rental car (smart estimate)
-# ---------------------------------------------------------
-
-st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
-st.markdown('<div class="miip-section-title">8. Hertz rental car</div>', unsafe_allow_html=True)
 
 hertz_daily_rate = 0.0
 if include_rental_car:
@@ -444,17 +416,9 @@ if include_rental_car:
         hertz_daily_rate = estimate_hertz_suv_daily_rate(destination_airport)
     else:
         hertz_daily_rate = estimate_hertz_suv_daily_rate("BOS")
-    st.write(
-        f"Estimated Hertz SUV rate near **{destination_airport or 'destination'}**: "
-        f"**${hertz_daily_rate:,.0f}** per day."
-    )
-else:
-    st.write("Rental car excluded from this estimate.")
-
-st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 9. Trip cost summary & totals
+# 6. Trip cost summary & totals
 # ---------------------------------------------------------
 
 if can_calculate:
@@ -476,7 +440,7 @@ if can_calculate:
     final_total = base_grand_total + contingency_amount
 
     st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="miip-section-title">9. Trip cost summary</div>', unsafe_allow_html=True)
+    st.markdown('<div class="miip-section-title">6. Trip cost summary</div>', unsafe_allow_html=True)
 
     st.write("**Trip overview**")
     st.write(
