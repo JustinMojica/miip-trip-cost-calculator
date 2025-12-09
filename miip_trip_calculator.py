@@ -273,7 +273,6 @@ with col_left:
     st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
     st.markdown('<div class="miip-section-title">Traveler & flights</div>', unsafe_allow_html=True)
 
-    # Tooltip instead of inline text
     travelers = st.number_input(
         "Number of travelers",
         min_value=1,
@@ -368,7 +367,6 @@ if destination_airport_raw.strip() and not valid_destination_for_flights:
 st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
 st.markdown('<div class="miip-section-title">Flights</div>', unsafe_allow_html=True)
 
-# Radio with new label text
 flight_pricing_mode = st.radio(
     "",
     ("Auto calculate", "Enter manually"),
@@ -435,7 +433,6 @@ if can_calculate:
     st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
     st.markdown('<div class="miip-section-title">Trip cost summary</div>', unsafe_allow_html=True)
 
-    # No "Trip overview" label; straight into bullets
     st.write(f"- Route: **{departure_airport} → {destination_airport or '???'} → {departure_airport}**")
     st.write(f"- Dates: **{departure_date.strftime('%m/%d/%Y')} – {return_date.strftime('%m/%d/%Y')}**")
     st.write(f"- Trip days/nights: **{trip_days} / {trip_nights}**")
@@ -502,7 +499,7 @@ if can_calculate:
         st.markdown(f"- Other fixed costs entered: **${other_fixed_costs:,.2f}**")
 
         st.markdown("#### Contingency")
-        st.markmarkdown(
+        st.markdown(
             f"- Subtotal before contingency: **${base_total:,.2f}**"
         )
         st.markdown(
@@ -517,5 +514,3 @@ if can_calculate:
 
 else:
     st.info("Select valid departure and return dates to see the full trip cost breakdown.")
-
-
