@@ -63,7 +63,7 @@ st.markdown(
 st.markdown('<div class="miip-title">Expense Calculator</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="miip-subtitle">'
-    'Estimate audit trip costs quickly with smart defaults for flights, hotel, meals, and Hertz rental car.'
+    'Estimate audit trip costs for flights, hotel, meals, and Hertz rental car.'
     '</div>',
     unsafe_allow_html=True,
 )
@@ -390,3 +390,209 @@ else:
                 st.caption(f"Estimated average round-trip fare per traveler: **${avg_fare:,.0f}**.")
     else:
         st.caption("Enter a valid destination airport and dates to estimate flights via Amadeus.")
+
+# Bag fees – compute per traveler so we can show in geek math
+if is_domestic_route(departure_airport, destination_airport):
+    bag_fee_per_traveler = DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70.0)
+    bag_route_note = "Domestic route; using airline-specific domestic bag fee."
+else:
+    bag_fee_per_traveler = 0.0
+    bag_route_note = "Non-domestic or unknown route; bag fees assumed $0."
+
+bags_total = bag_fee_per_traveler * travelers
+st.caption(bag_route_note)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 6. Hotel (preferred brand – smart estimate)
+# ---------------------------------------------------------
+
+st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
+st.markdown('<div class="miip-section-title">6. Hotel</div>', unsafe_allow_html=True)
+
+hotel_nightly_rate = estimate_hotel_nightly_rate(destination_airport) if destination_airport else DEFAULT_HOTEL_NIGHTLY_RATE
+st.write(
+    f"Nightly estimate near **{destination_airport or 'destination'}** for **{preferred_hotel_brand}**: "
+    f"**${hotel_nightly_rate:,.0f}** / room."
+)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 7. Meals (smart estimate)
+# ---------------------------------------------------------
+
+st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
+st.markdown('<div class="miip-section-title">7. Meals</div>', unsafe_allow_html=True)
+
+meal_rate_per_day = estimate_meal_rate_per_day(destination_airport) if destination_airport else BASE_MEAL_RATE
+st.write(
+    f"Meal estimate: **${meal_rate_per_day:,.0f}** per traveler per day "
+    f"for **{destination_airport or 'destination'}**."
+)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 8. Hertz rental car (smart estimate)
+# ---------------------------------------------------------
+
+st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
+st.markdown('<div class="miip-section-title">8. Hertz rental car</div>', unsafe_allow_html=True)
+
+hertz_daily_rate = 0.0
+if include_rental_car:
+    if destination_airport:
+        hertz_daily_rate = estimate_hertz_suv_daily_rate(destination_airport)
+    else:
+        hertz_daily_rate = estimate_hertz_suv_daily_rate("BOS")
+    st.write(
+        f"Estimated Hertz SUV rate near **{destination_airport or 'destination'}**: "
+        f"**${hertz_daily_rate:,.0f}** per day."
+    )
+else:
+    st.write("Rental car excluded from this estimate.")
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 9. Trip cost summary & totals
+# ---------------------------------------------------------
+
+if can_calculate:
+    flights_total = flight_cost_per_person * travelers
+    hotel_total = hotel_nightly_rate * trip_nights * travelers
+    meals_total = meal_rate_per_day * trip_days * travelers
+    rental_total = hertz_daily_rate * trip_days if include_rental_car else 0.0
+
+    base_grand_total = (
+        flights_total
+        + bags_total
+        + hotel_total
+        + meals_total
+        + rental_total
+        + other_fixed_costs
+    )
+
+    contingency_amount = base_grand_total * CONTINGENCY_RATE
+    final_total = base_grand_total + contingency_amount
+
+    st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="miip-section-title">9. Trip cost summary</div>', unsafe_allow_html=True)
+
+    st.write("**Trip overview**")
+    st.write(
+        f"- Route: **{departure_airport} → {destination_airport or '???'} → {departure_airport}**"
+    )
+    st.write(f"- Dates: **{departure_date.isoformat()} – {return_date.isoformat()}**")
+    st.write(f"- Trip days / nights: **{trip_days} days / {trip_nights} nights**")
+    st.write(f"- Travelers: **{travelers}**")
+
+    st.write("")
+    st.write("**Cost components**")
+    st.write(f"- Flights total (tickets): **${flights_total:,.0f}**")
+    st.write(f"- Checked bags total: **${bags_total:,.0f}**")
+    st.write(f"- Hotel total: **${hotel_total:,.0f}**")
+    st.write(f"- Meals total: **${meals_total:,.0f}**")
+    if include_rental_car:
+        st.write(f"- Hertz rental car total: **${rental_total:,.0f}**")
+    else:
+        st.write("- Hertz rental car total: **$0** (excluded)")
+    st.write(f"- Other fixed costs: **${other_fixed_costs:,.0f}**")
+
+    st.write("")
+    st.write("**Contingency**")
+    st.write(f"- Subtotal before contingency: **${base_grand_total:,.0f}**")
+    st.write(f"- 15% contingency buffer: **${contingency_amount:,.0f}**")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Single green box with final total (incl. 15% buffer)
+    st.success(f"Grand total (incl. 15% contingency): ${final_total:,.0f}")
+
+    # -----------------------------------------------------
+    # Geek math & logic (collapsible, input-specific)
+    # -----------------------------------------------------
+    with st.expander("Show detailed cost math", expanded=False):
+        st.markdown('<div class="miip-geek-math">', unsafe_allow_html=True)
+
+        st.markdown("#### Trip length")
+        st.markdown(
+            f"- `trip_days` = max(({(return_date - departure_date).days} + 1), 1) = **{trip_days}**  "
+            "_(counts both departure and return days)_"
+        )
+        st.markdown(
+            f"- `trip_nights` = max({(return_date - departure_date).days}, 0) = **{trip_nights}**  "
+            "_(hotel billed per night)_"
+        )
+
+        st.markdown("#### Flights")
+        st.markdown(
+            f"- Average round-trip fare per traveler: **${flight_cost_per_person:,.2f}**  "
+            "_(manual entry or Amadeus average)_"
+        )
+        st.markdown(
+            f"- Flights total: `${flight_cost_per_person:,.2f} × {travelers}`"
+            f" = **${flights_total:,.2f}**"
+        )
+
+        st.markdown("#### Checked bags")
+        st.markdown(
+            f"- Bag fee per traveler: **${bag_fee_per_traveler:,.2f}** "
+            f"({'domestic route' if bag_fee_per_traveler > 0 else 'non-domestic/assumed $0'})"
+        )
+        st.markdown(
+            f"- Bags total: `${bag_fee_per_traveler:,.2f} × {travelers}`"
+            f" = **${bags_total:,.2f}**  _(1 checked bag per traveler for the round trip)_"
+        )
+
+        st.markdown("#### Hotel")
+        st.markdown(
+            f"- Nightly rate: **${hotel_nightly_rate:,.2f}** per room near {destination_airport or 'destination'}"
+        )
+        st.markdown(
+            f"- Hotel total: `${hotel_nightly_rate:,.2f} × {trip_nights} nights × {travelers} rooms`"
+            f" = **${hotel_total:,.2f}**"
+        )
+
+        st.markdown("#### Meals")
+        st.markdown(
+            f"- Daily meal rate: **${meal_rate_per_day:,.2f}** per traveler"
+        )
+        st.markdown(
+            f"- Meals total: `${meal_rate_per_day:,.2f} × {trip_days} days × {travelers} travelers`"
+            f" = **${meals_total:,.2f}**"
+        )
+
+        st.markdown("#### Hertz rental car")
+        if include_rental_car:
+            st.markdown(
+                f"- Daily SUV rate: **${hertz_daily_rate:,.2f}** "
+                "_(base Hertz rate → +15% SUV → −12% membership discount)_"
+            )
+            st.markdown(
+                f"- Rental total: `${hertz_daily_rate:,.2f} × {trip_days} days`"
+                f" = **${rental_total:,.2f}**"
+            )
+        else:
+            st.markdown("- Rental car excluded → **$0**")
+
+        st.markdown("#### Other fixed costs")
+        st.markdown(
+            f"- Other fixed costs entered: **${other_fixed_costs:,.2f}**"
+        )
+
+        st.markdown("#### Roll-up & contingency")
+        st.markdown(
+            f"- Subtotal before contingency: **${base_grand_total:,.2f}**"
+        )
+        st.markdown(
+            f"- Contingency (15%): `${base_grand_total:,.2f} × 0.15`"
+            f" = **${contingency_amount:,.2f}**  _(buffer for missed fees / surprises)_"
+        )
+        st.markdown(
+            f"- Final total: `${base_grand_total:,.2f} + ${contingency_amount:,.2f}`"
+            f" = **${final_total:,.2f}**"
+        )
+
+        st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("Fix the date error above to see the full trip cost breakdown and totals.")
