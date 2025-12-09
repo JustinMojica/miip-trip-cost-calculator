@@ -27,7 +27,6 @@ st.markdown(
         color: #c4c4c4;
         margin-bottom: 1.5rem;
     }
-    /* Structural section wrapper without visible box */
     .miip-section-card {
         padding: 0 0 0.75rem 0;
         border: none;
@@ -207,7 +206,7 @@ def get_average_round_trip_fare(
     - Query Amadeus once for all airlines.
     - If there are offers whose validating airline matches the preferred airline,
       average only those.
-    - Otherwise, average across all returned offers.
+    - Otherwise, average across all returned offers and show a yellow warning.
     """
 
     preferred_code = AIRLINE_CODES.get(airline_name)
@@ -248,7 +247,6 @@ def get_average_round_trip_fare(
         prices_all.append(price)
 
         if preferred_code:
-            # Try to infer validating airline code(s)
             validating_codes = offer.get("validatingAirlineCodes") or offer.get("validatingAirlineCode")
             if isinstance(validating_codes, list):
                 if preferred_code in validating_codes:
@@ -269,9 +267,8 @@ def get_average_round_trip_fare(
         )
     else:
         avg_price = round(mean(prices_all), 2)
-        st.caption(
-            "Estimated average round-trip fare per traveler based on all available airlines "
-            f"(no specific offers found for {airline_name}). "
+        st.warning(
+            "No usable prices found for the preferred airline only; using average of available airlines instead. "
             f"Average used: **${avg_price:,.0f}**."
         )
 
@@ -282,21 +279,11 @@ def get_average_round_trip_fare(
 # Inputs – layout
 # ---------------------------------------------------------
 
-today = dt.date.today()
-default_departure_date = today
-default_return_date = today + dt.timedelta(days=1)
-
 col_left, col_right = st.columns(2)
 
 with col_left:
     st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
     st.markdown('<div class="miip-section-title">1. Traveler & flights</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="miip-section-caption">'
-        'Who is traveling and which route/airline you prefer.'
-        '</div>',
-        unsafe_allow_html=True,
-    )
 
     travelers = st.number_input("Number of travelers (one room per traveler)", min_value=1, value=1, step=1)
     departure_airport = st.selectbox("Departure airport (home base)", ["BOS", "MHT"])
@@ -307,12 +294,6 @@ with col_left:
 with col_right:
     st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
     st.markdown('<div class="miip-section-title">2. Client & hotel options</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="miip-section-caption">'
-        'Client address is informational; hotel brand steers the nightly estimate.'
-        '</div>',
-        unsafe_allow_html=True,
-    )
 
     client_address = st.text_input("Client office address", "", help="City, State")
     preferred_hotel_brand = st.selectbox("Preferred hotel brand", ["Marriott", "Hilton", "Wyndham"])
@@ -324,16 +305,33 @@ with col_dates:
     st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
     st.markdown('<div class="miip-section-title">3. Dates</div>', unsafe_allow_html=True)
 
-    departure_date = st.date_input("Departure date", value=default_departure_date)
-    return_date = st.date_input(
-        "Return date",
-        value=max(default_return_date, departure_date + dt.timedelta(days=1)),
-        min_value=departure_date + dt.timedelta(days=1),
+    departure_date = st.date_input(
+        "Departure date",
+        value=None,
+        format="MM/DD/YYYY",
+        key="departure_date",
     )
-    st.markdown(
-        '<div class="miip-microcopy">Trip days and nights are computed automatically from your dates.</div>',
-        unsafe_allow_html=True,
-    )
+
+    if departure_date is None:
+        return_date = st.date_input(
+            "Return date",
+            value=None,
+            format="MM/DD/YYYY",
+            key="return_date",
+            disabled=True,
+        )
+        st.info("Select a departure date to enable the return date.")
+    else:
+        min_ret = departure_date + dt.timedelta(days=1)
+        default_ret = min_ret
+        return_date = st.date_input(
+            "Return date",
+            value=default_ret,
+            min_value=min_ret,
+            format="MM/DD/YYYY",
+            key="return_date",
+        )
+
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col_ground:
@@ -348,16 +346,21 @@ with col_ground:
 # Derived trip length & validation
 # ---------------------------------------------------------
 
-if return_date <= departure_date:
-    st.error("Return date must be after the departure date.")
+if departure_date is None or return_date is None:
     can_calculate = False
     trip_days = 1
     trip_nights = 0
 else:
-    can_calculate = True
-    delta_days = (return_date - departure_date).days
-    trip_days = max(delta_days + 1, 1)
-    trip_nights = max(delta_days, 0)
+    if return_date <= departure_date:
+        st.error("Return date must be after the departure date.")
+        can_calculate = False
+        trip_days = 1
+        trip_nights = 0
+    else:
+        can_calculate = True
+        delta_days = (return_date - departure_date).days
+        trip_days = max(delta_days + 1, 1)
+        trip_nights = max(delta_days, 0)
 
 # ---------------------------------------------------------
 # 5. Flights (preferred airline + smart checked bags)
@@ -401,18 +404,15 @@ else:
             if avg_fare is not None:
                 flight_cost_per_person = avg_fare
     else:
-        st.caption("Enter a valid destination airport and dates to estimate flights via Amadeus.")
+        st.caption("Enter a valid destination airport and both dates to estimate flights via Amadeus.")
 
 # Bag fees – compute per traveler so we can show in geek math
-if is_domestic_route(departure_airport, destination_airport):
+if departure_airport and destination_airport and is_domestic_route(departure_airport, destination_airport):
     bag_fee_per_traveler = DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70.0)
-    bag_route_note = "Domestic route; using airline-specific domestic bag fee."
 else:
     bag_fee_per_traveler = 0.0
-    bag_route_note = "Non-domestic or unknown route; bag fees assumed $0."
 
 bags_total = bag_fee_per_traveler * travelers
-st.caption(bag_route_note)
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
@@ -458,7 +458,7 @@ if can_calculate:
     st.write(
         f"- Route: **{departure_airport} → {destination_airport or '???'} → {departure_airport}**"
     )
-    st.write(f"- Dates: **{departure_date.isoformat()} – {return_date.isoformat()}**")
+    st.write(f"- Dates: **{departure_date.strftime('%m/%d/%Y')} – {return_date.strftime('%m/%d/%Y')}**")
     st.write(f"- Trip days / nights: **{trip_days} days / {trip_nights} nights**")
     st.write(f"- Travelers: **{travelers}**")
 
@@ -473,11 +473,6 @@ if can_calculate:
     else:
         st.write("- Hertz rental car total: **$0** (excluded)")
     st.write(f"- Other fixed costs: **${other_fixed_costs:,.0f}**")
-
-    st.write("")
-    st.write("**Contingency**")
-    st.write(f"- Subtotal before contingency: **${base_grand_total:,.0f}**")
-    st.write(f"- 15% contingency buffer: **${contingency_amount:,.0f}**")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -512,7 +507,7 @@ if can_calculate:
         st.markdown("#### Checked bags")
         st.markdown(
             f"- Bag fee per traveler: **${bag_fee_per_traveler:,.2f}** "
-            f"({'domestic route' if bag_fee_per_traveler > 0 else 'non-domestic/assumed $0'})"
+            "(domestic route only; otherwise assumed $0)"
         )
         st.markdown(
             f"- Bags total: `${bag_fee_per_traveler:,.2f} × {travelers}`"
@@ -570,4 +565,4 @@ if can_calculate:
 
         st.markdown('</div>', unsafe_allow_html=True)
 else:
-    st.info("Fix the date error above to see the full trip cost breakdown and totals.")
+    st.info("Select valid departure and return dates to see the full trip cost breakdown and totals.")
