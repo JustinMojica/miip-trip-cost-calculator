@@ -288,7 +288,8 @@ with col_left:
     travelers = st.number_input("Number of travelers (one room per traveler)", min_value=1, value=1, step=1)
     departure_airport = st.selectbox("Departure airport (home base)", ["BOS", "MHT"])
     preferred_airline = st.selectbox("Preferred airline", list(AIRLINE_CODES.keys()))
-    destination_airport = st.text_input("Destination airport (IATA, e.g., TPA)").upper()
+    destination_airport_raw = st.text_input("Destination airport (IATA, e.g., TPA)")
+    destination_airport = destination_airport_raw.strip().upper()
     st.markdown("</div>", unsafe_allow_html=True)
 
 with col_right:
@@ -299,7 +300,13 @@ with col_right:
     preferred_hotel_brand = st.selectbox("Preferred hotel brand", ["Marriott", "Hilton", "Wyndham"])
     st.markdown("</div>", unsafe_allow_html=True)
 
+# Blue info box under sections 1 & 2
+st.info("Fill out traveler, route, and client/hotel info above, then continue with dates, ground costs, and flights below.")
+
 col_dates, col_ground = st.columns(2)
+
+# Dates with MM/DD/YYYY format; always enabled & working
+today = dt.date.today()
 
 with col_dates:
     st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
@@ -307,30 +314,19 @@ with col_dates:
 
     departure_date = st.date_input(
         "Departure date",
-        value=None,
+        value=today,
         format="MM/DD/YYYY",
         key="departure_date",
     )
 
-    if departure_date is None:
-        return_date = st.date_input(
-            "Return date",
-            value=None,
-            format="MM/DD/YYYY",
-            key="return_date",
-            disabled=True,
-        )
-        st.info("Select a departure date to enable the return date.")
-    else:
-        min_ret = departure_date + dt.timedelta(days=1)
-        default_ret = min_ret
-        return_date = st.date_input(
-            "Return date",
-            value=default_ret,
-            min_value=min_ret,
-            format="MM/DD/YYYY",
-            key="return_date",
-        )
+    min_ret = departure_date + dt.timedelta(days=1)
+    return_date = st.date_input(
+        "Return date",
+        value=min_ret,
+        min_value=min_ret,
+        format="MM/DD/YYYY",
+        key="return_date",
+    )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -346,21 +342,28 @@ with col_ground:
 # Derived trip length & validation
 # ---------------------------------------------------------
 
-if departure_date is None or return_date is None:
+if return_date <= departure_date:
+    st.error("Return date must be after the departure date.")
     can_calculate = False
     trip_days = 1
     trip_nights = 0
 else:
-    if return_date <= departure_date:
-        st.error("Return date must be after the departure date.")
-        can_calculate = False
-        trip_days = 1
-        trip_nights = 0
-    else:
-        can_calculate = True
-        delta_days = (return_date - departure_date).days
-        trip_days = max(delta_days + 1, 1)
-        trip_nights = max(delta_days, 0)
+    can_calculate = True
+    delta_days = (return_date - departure_date).days
+    trip_days = max(delta_days + 1, 1)
+    trip_nights = max(delta_days, 0)
+
+# ---------------------------------------------------------
+# Destination validity for flights
+# ---------------------------------------------------------
+
+valid_destination_for_flights = bool(destination_airport) and len(destination_airport) == 3
+
+if destination_airport_raw.strip() and not valid_destination_for_flights:
+    st.warning(
+        "Destination airport should be a 3-letter IATA code (e.g., TPA, BWI, DEN). "
+        "Flights will not be estimated until this is corrected."
+    )
 
 # ---------------------------------------------------------
 # 5. Flights (preferred airline + smart checked bags)
@@ -390,7 +393,7 @@ if flight_pricing_mode == "Enter manually":
     if manual_flight_cost == 0:
         st.warning("Manual flight cost is set to $0. Update this if you want flights included.")
 else:
-    if can_calculate and destination_airport:
+    if can_calculate and valid_destination_for_flights:
         amadeus_client = get_amadeus_client()
         if amadeus_client is not None:
             avg_fare = get_average_round_trip_fare(
@@ -404,10 +407,13 @@ else:
             if avg_fare is not None:
                 flight_cost_per_person = avg_fare
     else:
-        st.caption("Enter a valid destination airport and both dates to estimate flights via Amadeus.")
+        if not valid_destination_for_flights:
+            st.caption("Enter a valid 3-letter destination airport code to estimate flights via Amadeus.")
+        else:
+            st.caption("Enter valid dates to estimate flights via Amadeus.")
 
 # Bag fees – compute per traveler so we can show in geek math
-if departure_airport and destination_airport and is_domestic_route(departure_airport, destination_airport):
+if valid_destination_for_flights and is_domestic_route(departure_airport, destination_airport):
     bag_fee_per_traveler = DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70.0)
 else:
     bag_fee_per_traveler = 0.0
@@ -566,3 +572,4 @@ if can_calculate:
         st.markdown('</div>', unsafe_allow_html=True)
 else:
     st.info("Select valid departure and return dates to see the full trip cost breakdown and totals.")
+
