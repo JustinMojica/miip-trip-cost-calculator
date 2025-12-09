@@ -28,6 +28,7 @@ AIRLINE_CODES = {
     "American": "AA",
 }
 
+
 def fetch_roundtrip_flight_avg(
     origin: str,
     destination: str,
@@ -336,6 +337,7 @@ HERTZ_DEFAULT_BASE_DAILY = 80.0
 HERTZ_SUV_UPLIFT = 0.15           # SUVs cost ~15% more than compact.
 HERTZ_MEMBERSHIP_DISCOUNT = 0.12  # 12% off for your corporate/membership rate.
 
+
 def estimate_hertz_suv_daily_rate(dest_airport: str) -> float:
     """
     Smart Hertz SUV daily rate estimate with membership discount baked in.
@@ -389,6 +391,7 @@ MID_TIER_AIRPORTS = {
     "SLC", "ABQ",
 }
 
+
 def estimate_meal_rate_per_day(dest_airport: str) -> float:
     """
     Meal formula:
@@ -408,11 +411,52 @@ def estimate_meal_rate_per_day(dest_airport: str) -> float:
 
 
 # -----------------------------------------------------------------------------
-# Checked baggage: always included
+# Checked baggage: smart airline + domestic logic
 # -----------------------------------------------------------------------------
-# You requested: 1 flier = 1 bag = $40, 2 fliers = $80, etc.
-# We'll interpret that as **$40 per traveler per round trip**.
-CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP = 40.0  # USD
+# Domestic bag fee per traveler, round-trip, assuming 1 checked bag:
+# - Southwest: 0 (2 free bags)
+# - JetBlue / Delta / American: ~ $70 per traveler round trip
+DOMESTIC_BAG_FEE_BY_AIRLINE = {
+    "Southwest": 0.0,
+    "JetBlue": 70.0,
+    "Delta": 70.0,
+    "American": 70.0,
+}
+
+# Use all airports we know about from hotel/rental tables as "US airports",
+# plus MHT which is in your UI but not in those dicts.
+US_AIRPORTS = set(HOTEL_BASE_RATE_BY_AIRPORT.keys()) | set(HERTZ_BASE_DAILY_BY_AIRPORT.keys())
+US_AIRPORTS.add("MHT")
+
+
+def is_domestic_route(origin: str, dest: str) -> bool:
+    """A simple heuristic: if both airports are in our US list, treat as domestic."""
+    o = (origin or "").upper().strip()
+    d = (dest or "").upper().strip()
+    return o in US_AIRPORTS and d in US_AIRPORTS
+
+
+def estimate_bag_fee_total(
+    preferred_airline: str,
+    origin: str,
+    dest: str,
+    travelers: int,
+) -> float:
+    """
+    Smart checked-bag fee:
+      - If domestic:
+          Southwest -> 0 per traveler
+          JetBlue/Delta/American -> ~70 per traveler (round trip)
+          Others -> fallback ~70 per traveler
+      - If not domestic:
+          assume 0 (most intl itineraries include 1 checked bag)
+    """
+    if is_domestic_route(origin, dest):
+        per_traveler = DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70.0)
+    else:
+        per_traveler = 0.0
+
+    return per_traveler * travelers
 
 
 # -----------------------------------------------------------------------------
@@ -421,6 +465,7 @@ CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP = 40.0  # USD
 def calc_trip_days(depart: date, ret: date) -> int:
     delta = (ret - depart).days
     return max(delta + 1, 1)
+
 
 def calc_trip_nights(depart: date, ret: date) -> int:
     # Nights are usually one less than days, but never < 0.
@@ -533,9 +578,9 @@ trip_days = calc_trip_days(departure_date, return_date)
 trip_nights = calc_trip_nights(departure_date, return_date)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Flights (with mandatory checked baggage)
+# 3. Flights (with smart checked baggage)
 # ─────────────────────────────────────────────────────────────────────────────
-st.header("3. Flights (preferred airline + checked bags)")
+st.header("3. Flights (preferred airline + smart checked bags)")
 
 flight_mode = st.radio(
     "How should we calculate flights?",
@@ -552,8 +597,9 @@ manual_flight_cost = st.number_input(
 )
 
 st.caption(
-    f"Checked bags are always included: "
-    f"**${CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP:,.2f} per traveler (round trip)**."
+    "Checked bags are automatically included based on airline and whether the route is domestic. "
+    "Example: Southwest often $0 (2 free bags), JetBlue/Delta/American ~ $70 per traveler "
+    "per round trip for one checked bag."
 )
 
 flight_cost_per_person = 0.0
@@ -664,10 +710,14 @@ else:
     # Airfare (excluding bags)
     flights_total = flight_cost_per_person * travelers
 
-    # Checked baggage – always included
-    bags_total = travelers * CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP
+    # Checked baggage – smart per-airline/per-route
+    bags_total = estimate_bag_fee_total(
+        preferred_airline=preferred_airline,
+        origin=departure_airport,
+        dest=destination_airport,
+        travelers=travelers,
+    )
 
-    # Hotel & meals
     hotel_total = hotel_nightly_rate * trip_nights * travelers
 
     grand_total = (
@@ -700,8 +750,9 @@ else:
 
     st.write(f"**Checked bags total:** ${bags_total:,.2f}")
     st.caption(
-        f"{travelers} traveler(s) × "
-        f"${CHECKED_BAG_FEE_PER_TRAVELER_ROUNDTRIP:,.2f} per traveler (round trip)."
+        "Smart bag estimate based on airline and whether the route is domestic. "
+        "Domestic Southwest usually $0; JetBlue/Delta/American ~ $70 per traveler "
+        "per round trip for one checked bag. Non-U.S. routes treated as $0 for bags."
     )
 
     st.write(f"**Hotel total:** ${hotel_total:,.2f}")
@@ -734,8 +785,9 @@ else:
 
     st.caption(
         "Notes: Flights use Amadeus Production APIs where available. "
-        "Checked baggage is automatically added at $40 per traveler per round trip. "
+        "Checked baggage is automatically added based on airline and domestic vs. non-domestic route. "
         "Hotels use business-realistic nightly estimates by destination airport. "
         "Meals use a $100/day base with +25% for expensive cities and +10% for mid-tier cities. "
         "Hertz rental car prices are smart membership-adjusted estimates for SUVs."
     )
+
