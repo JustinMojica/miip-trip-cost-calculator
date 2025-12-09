@@ -273,7 +273,7 @@ with col_left:
     st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
     st.markdown('<div class="miip-section-title">Traveler & flights</div>', unsafe_allow_html=True)
 
-    # UPDATED: tooltip instead of inline text
+    # Tooltip instead of inline text
     travelers = st.number_input(
         "Number of travelers",
         min_value=1,
@@ -333,7 +333,13 @@ with col_ground:
     st.markdown('<div class="miip-section-title">Ground costs</div>', unsafe_allow_html=True)
 
     include_rental_car = st.checkbox("Include Hertz rental SUV", value=True)
-    other_fixed_costs = st.number_input("Other fixed costs (USD)", min_value=0.0, value=0.0, step=50.0)
+    other_fixed_costs = st.number_input(
+        "Other fixed costs",
+        min_value=0.0,
+        value=0.0,
+        step=50.0,
+        help="Additional fixed expenses in USD (parking, tolls, etc.)",
+    )
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
@@ -362,10 +368,10 @@ if destination_airport_raw.strip() and not valid_destination_for_flights:
 st.markdown('<div class="miip-section-card">', unsafe_allow_html=True)
 st.markdown('<div class="miip-section-title">Flights</div>', unsafe_allow_html=True)
 
-# No "Flight pricing mode" label
+# Radio with new label text
 flight_pricing_mode = st.radio(
     "",
-    ("Use Amadeus average (preferred airline where available)", "Enter manually"),
+    ("Auto calculate", "Enter manually"),
 )
 
 flight_cost_per_person = 0.0
@@ -496,7 +502,7 @@ if can_calculate:
         st.markdown(f"- Other fixed costs entered: **${other_fixed_costs:,.2f}**")
 
         st.markdown("#### Contingency")
-        st.markdown(
+        st.markmarkdown(
             f"- Subtotal before contingency: **${base_total:,.2f}**"
         )
         st.markdown(
@@ -511,3 +517,5 @@ if can_calculate:
 
 else:
     st.info("Select valid departure and return dates to see the full trip cost breakdown.")
+
+
