@@ -81,18 +81,52 @@ CAR_SERVICE_RATES = {
         "6-14": 228.54,
     },
 }
-
-CAR_SERVICE_ADDONS = {
-    "Holiday surcharge": 25.00,
-    "Extra stop": 20.00,
-    "Early morning fee (12:00am–4:59am)": 10.00,
-    "Early morning gratuity (12:00am–4:59am)": 10.00,
-}
-
+CAR_SERVICE_HOLIDAY_SURCHARGE = 25.00
 CAR_SERVICE_CITIES = ["Nashua, NH", "Methuen, MA", "Lawrence, MA"]
 
 # ---------------------------------------------------------
-# Helpers
+# Holiday helpers (true-date holidays, not observed)
+# ---------------------------------------------------------
+
+def nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> dt.date:
+    first = dt.date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    day = 1 + offset + 7 * (n - 1)
+    return dt.date(year, month, day)
+
+def last_weekday_of_month(year: int, month: int, weekday: int) -> dt.date:
+    if month == 12:
+        next_month = dt.date(year + 1, 1, 1)
+    else:
+        next_month = dt.date(year, month + 1, 1)
+    last_day = next_month - dt.timedelta(days=1)
+    offset = (last_day.weekday() - weekday) % 7
+    return last_day - dt.timedelta(days=offset)
+
+def us_holidays_for_year(year: int) -> set:
+    new_years = dt.date(year, 1, 1)
+    juneteenth = dt.date(year, 6, 19)
+    independence = dt.date(year, 7, 4)
+    veterans = dt.date(year, 11, 11)
+    christmas = dt.date(year, 12, 25)
+
+    mlk = nth_weekday_of_month(year, 1, weekday=0, n=3)
+    presidents = nth_weekday_of_month(year, 2, weekday=0, n=3)
+    memorial = last_weekday_of_month(year, 5, weekday=0)
+    labor = nth_weekday_of_month(year, 9, weekday=0, n=1)
+    columbus = nth_weekday_of_month(year, 10, weekday=0, n=2)
+    thanksgiving = nth_weekday_of_month(year, 11, weekday=3, n=4)
+
+    return {
+        new_years, mlk, presidents, memorial, juneteenth, independence,
+        labor, columbus, veterans, thanksgiving, christmas
+    }
+
+def is_holiday(date_obj: dt.date) -> bool:
+    return date_obj in us_holidays_for_year(date_obj.year)
+
+# ---------------------------------------------------------
+# Amadeus + pricing helpers
 # ---------------------------------------------------------
 
 def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
@@ -108,28 +142,20 @@ def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
         if not client_id or not client_secret:
             return None, "Missing amadeus.client_id or amadeus.client_secret in Streamlit secrets."
 
-        client = Client(
-            client_id=client_id,
-            client_secret=client_secret,
-            hostname=hostname,
-        )
+        client = Client(client_id=client_id, client_secret=client_secret, hostname=hostname)
         return client, None
     except Exception as exc:
         return None, f"Amadeus client init error: {exc}"
 
-
 def is_domestic(origin: str, dest: str) -> bool:
     return origin.upper() in US_AIRPORTS and dest.upper() in US_AIRPORTS
-
 
 def hotel_rate(dest: str) -> float:
     return HOTEL_BASE_RATE_BY_AIRPORT.get(dest.upper(), DEFAULT_HOTEL_NIGHTLY_RATE)
 
-
 def hertz_rate(dest: str) -> float:
     base = HERTZ_BASE_DAILY_BY_AIRPORT.get(dest.upper(), 80.0)
     return round(base * (1 + HERTZ_SUV_UPLIFT) * (1 - HERTZ_MEMBERSHIP_DISCOUNT), 2)
-
 
 def avg_flight_cost(
     client: Client,
@@ -186,6 +212,7 @@ def avg_flight_cost(
 
     return None, "none"
 
+# Car service helpers
 
 def car_service_vehicle_tier(travelers: int) -> Optional[str]:
     if 1 <= travelers <= 3:
@@ -196,37 +223,29 @@ def car_service_vehicle_tier(travelers: int) -> Optional[str]:
         return "6-14"
     return None
 
-
 def estimate_car_service_total(
     departure_airport: str,
     travelers: int,
     include: bool,
     city_choice: Optional[str],
-    addon_choices: List[str],
-) -> Tuple[float, str, float]:
-    """
-    Returns (total_cost, tier_label, base_rate).
-    If not includable (unsupported travelers or airport), returns 0 and explanatory labels.
-    """
+    pickup_date: dt.date,
+) -> Tuple[float, str, float, float]:
     if not include:
-        return 0.0, "n/a", 0.0
+        return 0.0, "n/a", 0.0, 0.0
 
     airport = departure_airport.upper()
     tier = car_service_vehicle_tier(travelers)
     if tier is None:
-        return 0.0, "unsupported", 0.0
+        return 0.0, "unsupported", 0.0, 0.0
 
     if airport not in CAR_SERVICE_RATES:
-        return 0.0, "unsupported-airport", 0.0
+        return 0.0, "unsupported-airport", 0.0, 0.0
 
-    # Contract lists the same destination set for these cities; city is for audit clarity.
-    _ = city_choice  # kept for record/UI; pricing same.
-
+    _ = city_choice  # for audit clarity only
     base = float(CAR_SERVICE_RATES[airport][tier])
-    addons_total = sum(CAR_SERVICE_ADDONS[name] for name in addon_choices)
-    total = round(base + addons_total, 2)
-    return total, tier, base
-
+    holiday_fee = CAR_SERVICE_HOLIDAY_SURCHARGE if is_holiday(pickup_date) else 0.0
+    total = round(base + holiday_fee, 2)
+    return total, tier, base, holiday_fee
 
 # ---------------------------------------------------------
 # Inputs
@@ -264,19 +283,12 @@ with g:
     include_rental = st.checkbox("Include Hertz rental SUV", value=True)
     other_fixed = st.number_input("Other fixed costs", min_value=0.0, value=0.0, step=50.0)
 
-    st.write("")  # small visual separation
+    st.write("")
 
     include_car_service = st.checkbox("Include car service", value=False)
     car_service_city = None
-    car_service_addons_selected: List[str] = []
-
     if include_car_service:
         car_service_city = st.selectbox("Car service area", CAR_SERVICE_CITIES)
-        car_service_addons_selected = st.multiselect(
-            "Car service add-ons",
-            list(CAR_SERVICE_ADDONS.keys()),
-            default=[],
-        )
 
 # ---------------------------------------------------------
 # Calculations
@@ -289,39 +301,31 @@ st.markdown('<div class="miip-section-title">Flights</div>', unsafe_allow_html=T
 mode = st.radio("", ["Auto calculate", "Enter manually"])
 
 flight_pp = 0.0
-flight_status = "manual"
 
 if mode == "Enter manually":
     flight_pp = st.number_input("Manual flight cost per traveler", min_value=0.0, value=0.0, step=50.0)
-    flight_status = "manual"
 else:
     if len(dest_airport) != 3:
         st.warning("Enter a valid 3-letter destination airport code to auto-calculate flights.")
-        flight_status = "blocked"
     else:
         amadeus_client, amadeus_err = try_get_amadeus_client()
         if amadeus_client is None:
             st.warning(f"Auto-calculate unavailable: {amadeus_err} Switch to manual flight entry.")
-            flight_status = "no_secrets"
         else:
             avg_price, status = avg_flight_cost(amadeus_client, dep_airport, dest_airport, dep_date, ret_date, preferred_airline)
             if status == "error":
                 st.error("Amadeus flight search failed. You can switch to manual entry.")
-                flight_status = "error"
             elif status == "none" or avg_price is None:
                 st.error("Amadeus returned no offers for this route/dates. You can enter flights manually.")
-                flight_status = "none"
             elif status == "preferred":
                 flight_pp = avg_price
                 st.caption(f"Estimated average round-trip fare per traveler for **{preferred_airline}**: **${flight_pp:,.0f}**.")
-                flight_status = "preferred"
             else:
                 flight_pp = avg_price
                 st.warning(
                     f"No usable prices found for the preferred airline only; using average of available airlines instead. "
                     f"Average used: **${flight_pp:,.0f}**."
                 )
-                flight_status = "fallback_all"
 
 flights_total = flight_pp * travelers
 
@@ -332,7 +336,7 @@ bag_fee_per_traveler = (
 )
 bags_total = bag_fee_per_traveler * travelers
 
-nightly_hotel_rate = hotel_rate(dest_airport) if len(dest_airort := dest_airport) == 3 else DEFAULT_HOTEL_NIGHTLY_RATE
+nightly_hotel_rate = hotel_rate(dest_airport) if len(dest_airport) == 3 else DEFAULT_HOTEL_NIGHTLY_RATE
 hotel_total = nightly_hotel_rate * trip_nights * travelers
 
 meals_total = MEALS_PER_DAY * trip_days * travelers
@@ -344,13 +348,13 @@ rental_total = daily_rental_rate * trip_days if include_rental else 0.0
 housekeeping_total = HOUSEKEEPING_PER_NIGHT * trip_nights * travelers
 fixed_incidentals_total = GAS_COST + TOLLS_COST + PARKING_COST + AIRPORT_SHUTTLE_TIPS + housekeeping_total
 
-# Car service
-car_service_total, car_service_tier, car_service_base = estimate_car_service_total(
+# Car service (holiday surcharge auto-applied if dep_date is a holiday)
+car_service_total, car_service_tier, car_service_base, car_service_holiday_fee = estimate_car_service_total(
     departure_airport=dep_airport,
     travelers=travelers,
     include=include_car_service,
     city_choice=car_service_city,
-    addon_choices=car_service_addons_selected,
+    pickup_date=dep_date,
 )
 
 if include_car_service and car_service_tier in ("unsupported", "unsupported-airport"):
@@ -371,7 +375,7 @@ contingency = subtotal * CONTINGENCY_RATE
 grand_total = subtotal + contingency
 
 # ---------------------------------------------------------
-# Summary
+# Summary (summarized rollups)
 # ---------------------------------------------------------
 
 st.markdown('<div class="miip-section-title">Trip cost summary</div>', unsafe_allow_html=True)
@@ -381,16 +385,9 @@ st.write(f"- Checked bags total: **${bags_total:,.0f}**")
 st.write(f"- Hotel total: **${hotel_total:,.0f}**")
 st.write(f"- Meals total: **${meals_total:,.0f}**")
 st.write(f"- Rental car total: **${rental_total:,.0f}**")
-
-st.write("**Fixed incidentals**")
-st.write(f"- Gas: **${GAS_COST:,.0f}**")
-st.write(f"- Tolls: **${TOLLS_COST:,.0f}**")
-st.write(f"- Parking: **${PARKING_COST:,.0f}**")
-st.write(f"- Airport shuttle tips: **${AIRPORT_SHUTTLE_TIPS:,.0f}**")
-st.write(f"- Housekeeping: **${housekeeping_total:,.0f}**")
+st.write(f"- Fixed incidentals total: **${fixed_incidentals_total:,.0f}**")
 
 if include_car_service:
-    st.write("**Car service**")
     st.write(f"- Car service total: **${car_service_total:,.0f}**")
 
 st.write(f"- Other fixed costs: **${other_fixed:,.0f}**")
@@ -443,14 +440,8 @@ with st.expander("Show detailed cost math", expanded=False):
         st.markdown(f"- Service area = `{car_service_city}`")
         st.markdown(f"- Passenger tier = `{car_service_tier}`")
         st.markdown(f"- Base rate (from contract) = `${car_service_base:,.2f}`")
-
-        if car_service_addons_selected:
-            for name in car_service_addons_selected:
-                st.markdown(f"- {name} = `${CAR_SERVICE_ADDONS[name]:,.2f}`")
-            st.markdown(f"- Add-ons total = `${sum(CAR_SERVICE_ADDONS[n] for n in car_service_addons_selected):,.2f}`")
-        else:
-            st.markdown("- Add-ons total = `$0.00`")
-
+        st.markdown(f"- Holiday surcharge applied? = `{is_holiday(dep_date)}`")
+        st.markdown(f"- Holiday surcharge = `${car_service_holiday_fee:,.2f}`")
         st.markdown(f"- Car service total = `${car_service_total:,.2f}`")
     else:
         st.markdown("- Car service excluded")
