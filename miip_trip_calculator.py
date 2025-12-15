@@ -9,32 +9,15 @@ from amadeus import Client, ResponseError
 # Page config & styling
 # ---------------------------------------------------------
 
-st.set_page_config(
-    page_title="Expense Calculator",
-    layout="wide",
-)
+st.set_page_config(page_title="Expense Calculator", layout="wide")
 
 st.markdown(
     """
     <style>
-    .miip-title {
-        font-size: 2.0rem;
-        font-weight: 700;
-        margin-bottom: 0.15rem;
-    }
-    .miip-subtitle {
-        font-size: 0.95rem;
-        color: #c4c4c4;
-        margin-bottom: 1.5rem;
-    }
-    .miip-section-title {
-        font-size: 1.05rem;
-        font-weight: 600;
-        margin-bottom: 0.3rem;
-    }
-    .miip-geek-math p, .miip-geek-math li {
-        margin-bottom: 0.2rem !important;
-    }
+    .miip-title { font-size: 2rem; font-weight: 700; margin-bottom: 0.15rem; }
+    .miip-subtitle { font-size: 0.95rem; color: #c4c4c4; margin-bottom: 1.5rem; }
+    .miip-section-title { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .miip-geek-math p, .miip-geek-math li { margin-bottom: 0.2rem !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -42,263 +25,144 @@ st.markdown(
 
 st.markdown('<div class="miip-title">Expense Calculator</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="miip-subtitle">'
-    'Estimate audit trip costs for flights, hotel, meals, and Hertz rental car.'
-    '</div>',
+    '<div class="miip-subtitle">Estimate audit trip costs for flights, hotel, meals, and Hertz rental car.</div>',
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------
-# Static data
+# Constants
 # ---------------------------------------------------------
 
-AIRLINE_CODES = {
-    "Delta": "DL",
-    "Southwest": "WN",
-    "JetBlue": "B6",
-    "American": "AA",
-}
-
-DOMESTIC_BAG_FEE_BY_AIRLINE = {
-    "Southwest": 0.0,
-    "JetBlue": 70.0,
-    "Delta": 70.0,
-    "American": 70.0,
-}
+AIRLINE_CODES = {"Delta": "DL", "Southwest": "WN", "JetBlue": "B6", "American": "AA"}
+DOMESTIC_BAG_FEE_BY_AIRLINE = {"Southwest": 0, "JetBlue": 70, "Delta": 70, "American": 70}
 
 US_AIRPORTS = {
-    "BOS","MHT","JFK","LGA","EWR","PHL","DCA","IAD","BWI","CLT","ATL",
-    "MCO","TPA","MIA","FLL","ORD","MDW","DFW","DAL","IAH","HOU",
-    "DEN","PHX","LAS","LAX","SFO","SJC","SEA","PDX","HNL","OGG","LIH","KOA",
+    "BOS","MHT","JFK","LGA","EWR","PHL","DCA","IAD","BWI","CLT","ATL","MCO","TPA","MIA","FLL",
+    "ORD","MDW","DFW","DAL","IAH","HOU","DEN","PHX","LAS","LAX","SFO","SEA","HNL"
 }
 
 HOTEL_BASE_RATE_BY_AIRPORT = {
-    "BOS": 260, "JFK": 280, "LGA": 270, "EWR": 260,
-    "LAX": 260, "SFO": 280, "SEA": 250, "DEN": 210,
-    "MCO": 210, "TPA": 215, "MIA": 260, "CLT": 190,
-    "PHL": 210, "ORD": 230, "ATL": 210,
+    "BOS":260,"JFK":280,"LGA":270,"EWR":260,"LAX":260,"SFO":280,"SEA":250,"DEN":210,
+    "MCO":210,"TPA":215,"MIA":260,"CLT":190,"PHL":210,"ORD":230,"ATL":210
 }
-
-DEFAULT_HOTEL_NIGHTLY_RATE = 190.0
+DEFAULT_HOTEL_NIGHTLY_RATE = 190
 
 HERTZ_BASE_DAILY_BY_AIRPORT = {
-    "BOS": 70, "MHT": 60, "JFK": 75, "LGA": 75, "EWR": 72,
-    "TPA": 65, "MCO": 65, "MIA": 70, "DEN": 68,
-    "SFO": 78, "LAX": 78, "SEA": 72,
+    "BOS":70,"MHT":60,"JFK":75,"LGA":75,"EWR":72,"TPA":65,"MCO":65,"MIA":70,
+    "DEN":68,"SFO":78,"LAX":78,"SEA":72
 }
-
 HERTZ_SUV_UPLIFT = 0.15
 HERTZ_MEMBERSHIP_DISCOUNT = 0.12
 
-MEAL_RATE_PER_DAY = 100.0
-CONTINGENCY_RATE = 0.05  # 5%
+MEALS_PER_DAY = 100
+CONTINGENCY_RATE = 0.05
+
+# Fixed incidentals
+GAS_COST = 60
+TOLLS_COST = 35
+PARKING_COST = 50
+AIRPORT_TIP = 10
+HOUSEKEEPING_PER_NIGHT = 10
 
 # ---------------------------------------------------------
-# Helper functions
+# Helpers
 # ---------------------------------------------------------
 
 def get_amadeus_client():
     try:
         cfg = st.secrets["amadeus"]
-        return Client(
-            client_id=cfg["client_id"],
-            client_secret=cfg["client_secret"],
-            hostname=cfg.get("hostname", "production"),
-        )
+        return Client(cfg["client_id"], cfg["client_secret"], hostname=cfg.get("hostname","production"))
     except Exception:
-        st.error("Amadeus configuration missing or invalid.")
+        st.error("Amadeus configuration missing.")
         return None
 
+def is_domestic(o,d): return o in US_AIRPORTS and d in US_AIRPORTS
+def hotel_rate(d): return HOTEL_BASE_RATE_BY_AIRPORT.get(d, DEFAULT_HOTEL_NIGHTLY_RATE)
+def hertz_rate(d): 
+    base = HERTZ_BASE_DAILY_BY_AIRPORT.get(d,80)
+    return round(base*(1+HERTZ_SUV_UPLIFT)*(1-HERTZ_MEMBERSHIP_DISCOUNT),2)
 
-def is_domestic(origin, dest):
-    return origin in US_AIRPORTS and dest in US_AIRPORTS
-
-
-def estimate_hotel_rate(dest):
-    return HOTEL_BASE_RATE_BY_AIRPORT.get(dest, DEFAULT_HOTEL_NIGHTLY_RATE)
-
-
-def estimate_hertz_rate(dest):
-    base = HERTZ_BASE_DAILY_BY_AIRPORT.get(dest, 80.0)
-    return round(base * (1 + HERTZ_SUV_UPLIFT) * (1 - HERTZ_MEMBERSHIP_DISCOUNT), 2)
-
-
-def get_avg_flight_cost(client, origin, dest, dep, ret, airline):
-    code = AIRLINE_CODES.get(airline)
+def avg_flight_cost(client,o,d,dep,ret,airline):
     try:
-        resp = client.shopping.flight_offers_search.get(
-            originLocationCode=origin,
-            destinationLocationCode=dest,
-            departureDate=dep.isoformat(),
-            returnDate=ret.isoformat(),
-            adults=1,
-            currencyCode="USD",
-            max=20,
+        r = client.shopping.flight_offers_search.get(
+            originLocationCode=o, destinationLocationCode=d,
+            departureDate=dep.isoformat(), returnDate=ret.isoformat(),
+            adults=1, currencyCode="USD", max=20
         )
     except ResponseError:
-        st.error("Amadeus flight search failed. You can switch to manual entry.")
+        st.error("Amadeus flight search failed.")
         return None
-
-    offers = resp.data
-    if not offers:
-        st.error("Amadeus returned no offers for this route/dates.")
-        return None
-
-    all_prices = []
-    preferred_prices = []
-
-    for o in offers:
-        try:
-            price = float(o["price"]["grandTotal"])
-            all_prices.append(price)
-            if code and code in (o.get("validatingAirlineCodes") or []):
-                preferred_prices.append(price)
-        except Exception:
-            pass
-
-    if preferred_prices:
-        avg = round(mean(preferred_prices), 2)
-    else:
-        avg = round(mean(all_prices), 2)
-        st.warning(
-            f"No usable prices found for the preferred airline only; "
-            f"using average of available airlines instead. Average used: ${avg:,.0f}."
-        )
-
-    return avg
+    prices=[float(x["price"]["grandTotal"]) for x in r.data if "price" in x]
+    return round(mean(prices),2) if prices else None
 
 # ---------------------------------------------------------
-# Layout
+# Inputs
 # ---------------------------------------------------------
 
-left, right = st.columns(2)
+l,r = st.columns(2)
 
-with left:
+with l:
     st.markdown('<div class="miip-section-title">Traveler & flights</div>', unsafe_allow_html=True)
+    travelers = st.number_input("Number of travelers",1,step=1,help="One room per traveler")
+    dep_airport = st.selectbox("Departure airport",["BOS","MHT"])
+    airline = st.selectbox("Preferred airline",list(AIRLINE_CODES))
+    dest_airport = st.text_input("Destination airport",help="3-letter IATA code").strip().upper()
 
-    travelers = st.number_input(
-        "Number of travelers",
-        min_value=1,
-        value=1,
-        step=1,
-        help="One room per traveler",
-    )
-
-    departure_airport = st.selectbox("Departure airport", ["BOS", "MHT"])
-    preferred_airline = st.selectbox("Preferred airline", list(AIRLINE_CODES.keys()))
-
-    destination_airport = st.text_input(
-        "Destination airport",
-        help="3-letter IATA code (e.g., TPA)",
-    ).strip().upper()
-
-with right:
+with r:
     st.markdown('<div class="miip-section-title">Client & hotel options</div>', unsafe_allow_html=True)
+    assignment = st.text_input("Assignment city and state",help="City, State")
+    hotel_brand = st.selectbox("Preferred hotel brand",["Marriott","Hilton","Wyndham"])
 
-    assignment_location = st.text_input(
-        "Assignment city and state",
-        help="City, State",
-    )
-
-    preferred_hotel_brand = st.selectbox(
-        "Preferred hotel brand",
-        ["Marriott", "Hilton", "Wyndham"],
-    )
-
-dates_col, ground_col = st.columns(2)
+d,g = st.columns(2)
 today = dt.date.today()
 
-with dates_col:
+with d:
     st.markdown('<div class="miip-section-title">Dates</div>', unsafe_allow_html=True)
+    dep_date = st.date_input("Departure date",today,format="MM/DD/YYYY")
+    ret_date = st.date_input("Return date",dep_date+dt.timedelta(days=1),
+                             min_value=dep_date+dt.timedelta(days=1),
+                             format="MM/DD/YYYY")
 
-    departure_date = st.date_input(
-        "Departure date",
-        value=today,
-        format="MM/DD/YYYY",
-    )
-
-    return_date = st.date_input(
-        "Return date",
-        value=departure_date + dt.timedelta(days=1),
-        min_value=departure_date + dt.timedelta(days=1),
-        format="MM/DD/YYYY",
-    )
-
-with ground_col:
+with g:
     st.markdown('<div class="miip-section-title">Ground costs</div>', unsafe_allow_html=True)
-
-    include_rental = st.checkbox("Include Hertz rental SUV", value=True)
-
-    other_fixed_costs = st.number_input(
-        "Other fixed costs",
-        min_value=0.0,
-        value=0.0,
-        step=50.0,
-        help="Additional fixed expenses in USD",
-    )
+    include_rental = st.checkbox("Include Hertz rental SUV",True)
+    other_fixed = st.number_input("Other fixed costs",0.0,step=50.0)
 
 # ---------------------------------------------------------
 # Calculations
 # ---------------------------------------------------------
 
-trip_days = (return_date - departure_date).days + 1
-trip_nights = max(trip_days - 1, 0)
+trip_days = (ret_date-dep_date).days+1
+trip_nights = trip_days-1
 
 st.markdown('<div class="miip-section-title">Flights</div>', unsafe_allow_html=True)
+mode = st.radio("",["Auto calculate","Enter manually"])
+flight_pp = 0
 
-flight_mode = st.radio("", ["Auto calculate", "Enter manually"])
-
-flight_cost = 0.0
-
-if flight_mode == "Enter manually":
-    flight_cost = st.number_input(
-        "Manual flight cost per traveler (round trip)",
-        min_value=0.0,
-        value=0.0,
-        step=50.0,
-    )
+if mode=="Enter manually":
+    flight_pp = st.number_input("Manual flight cost per traveler",0.0,step=50.0)
 else:
-    if len(destination_airport) == 3:
-        client = get_amadeus_client()
-        if client:
-            cost = get_avg_flight_cost(
-                client,
-                departure_airport,
-                destination_airport,
-                departure_date,
-                return_date,
-                preferred_airline,
-            )
-            if cost:
-                flight_cost = cost
+    if len(dest_airport)==3:
+        c = get_amadeus_client()
+        if c:
+            v = avg_flight_cost(c,dep_airport,dest_airport,dep_date,ret_date,airline)
+            if v: flight_pp=v
 
-bag_fee = (
-    DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70)
-    if is_domestic(departure_airport, destination_airport)
-    else 0
-)
+bags_total = (DOMESTIC_BAG_FEE_BY_AIRLINE.get(airline,70) if is_domestic(dep_airport,dest_airport) else 0)*travelers
+hotel_total = hotel_rate(dest_airport)*trip_nights*travelers
+meals_total = MEALS_PER_DAY*trip_days*travelers
+rental_total = hertz_rate(dest_airport)*trip_days if include_rental else 0
 
-hotel_rate = estimate_hotel_rate(destination_airport)
-meals_total = MEAL_RATE_PER_DAY * trip_days * travelers
-rental_rate = estimate_hertz_rate(destination_airport) if include_rental else 0
+# New fixed incidentals
+housekeeping_total = HOUSEKEEPING_PER_NIGHT*trip_nights*travelers
+fixed_incidentals = GAS_COST+TOLLS_COST+PARKING_COST+AIRPORT_TIP+housekeeping_total
 
-# Totals
-flights_total = flight_cost * travelers
-bags_total = bag_fee * travelers
-hotel_total = hotel_rate * trip_nights * travelers
-rental_total = rental_rate * trip_days
+flights_total = flight_pp*travelers
+subtotal = (flights_total+bags_total+hotel_total+meals_total+rental_total+
+            fixed_incidentals+other_fixed)
 
-subtotal = (
-    flights_total
-    + bags_total
-    + hotel_total
-    + meals_total
-    + rental_total
-    + other_fixed_costs
-)
-
-contingency = subtotal * CONTINGENCY_RATE
-grand_total = subtotal + contingency
+contingency = subtotal*CONTINGENCY_RATE
+grand_total = subtotal+contingency
 
 # ---------------------------------------------------------
 # Summary
@@ -306,24 +170,28 @@ grand_total = subtotal + contingency
 
 st.markdown('<div class="miip-section-title">Trip cost summary</div>', unsafe_allow_html=True)
 
-st.write(f"- Route: **{departure_airport} → {destination_airport} → {departure_airport}**")
-st.write(f"- Dates: **{departure_date:%m/%d/%Y} – {return_date:%m/%d/%Y}**")
-st.write(f"- Travelers: **{travelers}**")
-
-st.write("")
 st.write(f"- Flights total: **${flights_total:,.0f}**")
 st.write(f"- Checked bags total: **${bags_total:,.0f}**")
 st.write(f"- Hotel total: **${hotel_total:,.0f}**")
 st.write(f"- Meals total: **${meals_total:,.0f}**")
 st.write(f"- Rental car total: **${rental_total:,.0f}**")
-st.write(f"- Other fixed costs: **${other_fixed_costs:,.0f}**")
+
+st.write("**Fixed incidentals**")
+st.write(f"- Gas: $60")
+st.write(f"- Tolls: $35")
+st.write(f"- Parking: $50")
+st.write(f"- Airport shuttle tips: $10")
+st.write(f"- Housekeeping: ${housekeeping_total:,.0f}")
+
+st.write(f"- Other fixed costs: **${other_fixed:,.0f}**")
 
 st.success(f"Grand total: ${grand_total:,.0f}")
 
-with st.expander("Show detailed cost math", expanded=False):
+with st.expander("Show detailed cost math"):
     st.markdown('<div class="miip-geek-math">', unsafe_allow_html=True)
-    st.markdown(f"- Meals: `$100 × {trip_days} days × {travelers} travelers = ${meals_total:,.2f}`")
-    st.markdown(f"- Subtotal: **${subtotal:,.2f}**")
-    st.markdown(f"- Contingency (5%): **${contingency:,.2f}**")
-    st.markdown(f"- Final total: **${grand_total:,.2f}**")
+    st.markdown(f"- Housekeeping: $10 × {trip_nights} nights × {travelers} travelers = ${housekeeping_total}")
+    st.markdown(f"- Fixed incidentals total = ${fixed_incidentals}")
+    st.markdown(f"- Subtotal = ${subtotal:,.2f}")
+    st.markdown(f"- Contingency (5%) = ${contingency:,.2f}")
+    st.markdown(f"- Final total = ${grand_total:,.2f}")
     st.markdown('</div>', unsafe_allow_html=True)
