@@ -68,15 +68,34 @@ PARKING_COST = 50.0
 AIRPORT_SHUTTLE_TIPS = 10.0
 HOUSEKEEPING_PER_NIGHT = 10.0  # per night per traveler
 
+# Car service contract rates (BOS = Logan, MHT = Manchester)
+CAR_SERVICE_RATES = {
+    "BOS": {  # Logan -> Nashua/Methuen/Lawrence
+        "1-3": 161.76,   # Lincoln MKT/Aviator
+        "4-5": 229.12,   # SUV
+        "6-14": 295.00,  # Transit
+    },
+    "MHT": {  # Manchester -> Nashua/Methuen/Lawrence
+        "1-3": 97.19,
+        "4-5": 184.76,
+        "6-14": 228.54,
+    },
+}
+
+CAR_SERVICE_ADDONS = {
+    "Holiday surcharge": 25.00,
+    "Extra stop": 20.00,
+    "Early morning fee (12:00am–4:59am)": 10.00,
+    "Early morning gratuity (12:00am–4:59am)": 10.00,
+}
+
+CAR_SERVICE_CITIES = ["Nashua, NH", "Methuen, MA", "Lawrence, MA"]
+
 # ---------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------
 
 def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
-    """
-    Returns (client, error_message). Never throws.
-    Uses keyword args to match Amadeus SDK.
-    """
     try:
         if "amadeus" not in st.secrets:
             return None, "Missing [amadeus] section in Streamlit secrets."
@@ -89,7 +108,6 @@ def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
         if not client_id or not client_secret:
             return None, "Missing amadeus.client_id or amadeus.client_secret in Streamlit secrets."
 
-        # ✅ Correct Amadeus SDK initialization
         client = Client(
             client_id=client_id,
             client_secret=client_secret,
@@ -97,7 +115,6 @@ def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
         )
         return client, None
     except Exception as exc:
-        # This catches SDK init errors too (wrong types, etc.)
         return None, f"Amadeus client init error: {exc}"
 
 
@@ -122,10 +139,6 @@ def avg_flight_cost(
     ret: dt.date,
     preferred_airline: str,
 ) -> Tuple[Optional[float], str]:
-    """
-    Returns (avg_price, status)
-    status in {"preferred", "fallback_all", "none", "error"}
-    """
     preferred_code = AIRLINE_CODES.get(preferred_airline)
 
     try:
@@ -174,6 +187,47 @@ def avg_flight_cost(
     return None, "none"
 
 
+def car_service_vehicle_tier(travelers: int) -> Optional[str]:
+    if 1 <= travelers <= 3:
+        return "1-3"
+    if 4 <= travelers <= 5:
+        return "4-5"
+    if 6 <= travelers <= 14:
+        return "6-14"
+    return None
+
+
+def estimate_car_service_total(
+    departure_airport: str,
+    travelers: int,
+    include: bool,
+    city_choice: Optional[str],
+    addon_choices: List[str],
+) -> Tuple[float, str, float]:
+    """
+    Returns (total_cost, tier_label, base_rate).
+    If not includable (unsupported travelers or airport), returns 0 and explanatory labels.
+    """
+    if not include:
+        return 0.0, "n/a", 0.0
+
+    airport = departure_airport.upper()
+    tier = car_service_vehicle_tier(travelers)
+    if tier is None:
+        return 0.0, "unsupported", 0.0
+
+    if airport not in CAR_SERVICE_RATES:
+        return 0.0, "unsupported-airport", 0.0
+
+    # Contract lists the same destination set for these cities; city is for audit clarity.
+    _ = city_choice  # kept for record/UI; pricing same.
+
+    base = float(CAR_SERVICE_RATES[airport][tier])
+    addons_total = sum(CAR_SERVICE_ADDONS[name] for name in addon_choices)
+    total = round(base + addons_total, 2)
+    return total, tier, base
+
+
 # ---------------------------------------------------------
 # Inputs
 # ---------------------------------------------------------
@@ -210,6 +264,20 @@ with g:
     include_rental = st.checkbox("Include Hertz rental SUV", value=True)
     other_fixed = st.number_input("Other fixed costs", min_value=0.0, value=0.0, step=50.0)
 
+    st.write("")  # small visual separation
+
+    include_car_service = st.checkbox("Include car service", value=False)
+    car_service_city = None
+    car_service_addons_selected: List[str] = []
+
+    if include_car_service:
+        car_service_city = st.selectbox("Car service area", CAR_SERVICE_CITIES)
+        car_service_addons_selected = st.multiselect(
+            "Car service add-ons",
+            list(CAR_SERVICE_ADDONS.keys()),
+            default=[],
+        )
+
 # ---------------------------------------------------------
 # Calculations
 # ---------------------------------------------------------
@@ -233,7 +301,6 @@ else:
     else:
         amadeus_client, amadeus_err = try_get_amadeus_client()
         if amadeus_client is None:
-            # ✅ Don’t “break” the app — just warn and allow manual
             st.warning(f"Auto-calculate unavailable: {amadeus_err} Switch to manual flight entry.")
             flight_status = "no_secrets"
         else:
@@ -249,7 +316,6 @@ else:
                 st.caption(f"Estimated average round-trip fare per traveler for **{preferred_airline}**: **${flight_pp:,.0f}**.")
                 flight_status = "preferred"
             else:
-                # fallback_all
                 flight_pp = avg_price
                 st.warning(
                     f"No usable prices found for the preferred airline only; using average of available airlines instead. "
@@ -266,7 +332,7 @@ bag_fee_per_traveler = (
 )
 bags_total = bag_fee_per_traveler * travelers
 
-nightly_hotel_rate = hotel_rate(dest_airport) if len(dest_airport) == 3 else DEFAULT_HOTEL_NIGHTLY_RATE
+nightly_hotel_rate = hotel_rate(dest_airport) if len(dest_airort := dest_airport) == 3 else DEFAULT_HOTEL_NIGHTLY_RATE
 hotel_total = nightly_hotel_rate * trip_nights * travelers
 
 meals_total = MEALS_PER_DAY * trip_days * travelers
@@ -274,8 +340,21 @@ meals_total = MEALS_PER_DAY * trip_days * travelers
 daily_rental_rate = hertz_rate(dest_airport) if (include_rental and len(dest_airport) == 3) else (hertz_rate(dep_airport) if include_rental else 0.0)
 rental_total = daily_rental_rate * trip_days if include_rental else 0.0
 
+# Fixed incidentals
 housekeeping_total = HOUSEKEEPING_PER_NIGHT * trip_nights * travelers
 fixed_incidentals_total = GAS_COST + TOLLS_COST + PARKING_COST + AIRPORT_SHUTTLE_TIPS + housekeeping_total
+
+# Car service
+car_service_total, car_service_tier, car_service_base = estimate_car_service_total(
+    departure_airport=dep_airport,
+    travelers=travelers,
+    include=include_car_service,
+    city_choice=car_service_city,
+    addon_choices=car_service_addons_selected,
+)
+
+if include_car_service and car_service_tier in ("unsupported", "unsupported-airport"):
+    st.error("Car service is only priced for BOS or MHT and up to 14 passengers. Please contact dispatch for a custom quote.")
 
 subtotal = (
     flights_total
@@ -284,6 +363,7 @@ subtotal = (
     + meals_total
     + rental_total
     + fixed_incidentals_total
+    + car_service_total
     + other_fixed
 )
 
@@ -308,6 +388,10 @@ st.write(f"- Tolls: **${TOLLS_COST:,.0f}**")
 st.write(f"- Parking: **${PARKING_COST:,.0f}**")
 st.write(f"- Airport shuttle tips: **${AIRPORT_SHUTTLE_TIPS:,.0f}**")
 st.write(f"- Housekeeping: **${housekeeping_total:,.0f}**")
+
+if include_car_service:
+    st.write("**Car service**")
+    st.write(f"- Car service total: **${car_service_total:,.0f}**")
 
 st.write(f"- Other fixed costs: **${other_fixed:,.0f}**")
 
@@ -353,6 +437,23 @@ with st.expander("Show detailed cost math", expanded=False):
     st.markdown(f"- Airport shuttle tips = `${AIRPORT_SHUTTLE_TIPS:,.2f}`")
     st.markdown(f"- Housekeeping = `$10 × {trip_nights} × {travelers}` = `${housekeeping_total:,.2f}`")
     st.markdown(f"- Fixed incidentals total = `${fixed_incidentals_total:,.2f}`")
+
+    st.markdown("**Car service**")
+    if include_car_service:
+        st.markdown(f"- Service area = `{car_service_city}`")
+        st.markdown(f"- Passenger tier = `{car_service_tier}`")
+        st.markdown(f"- Base rate (from contract) = `${car_service_base:,.2f}`")
+
+        if car_service_addons_selected:
+            for name in car_service_addons_selected:
+                st.markdown(f"- {name} = `${CAR_SERVICE_ADDONS[name]:,.2f}`")
+            st.markdown(f"- Add-ons total = `${sum(CAR_SERVICE_ADDONS[n] for n in car_service_addons_selected):,.2f}`")
+        else:
+            st.markdown("- Add-ons total = `$0.00`")
+
+        st.markdown(f"- Car service total = `${car_service_total:,.2f}`")
+    else:
+        st.markdown("- Car service excluded")
 
     st.markdown("**Other fixed costs**")
     st.markdown(f"- Other fixed costs entered = `${other_fixed:,.2f}`")
