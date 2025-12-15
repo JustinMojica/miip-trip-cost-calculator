@@ -37,23 +37,71 @@ AIRLINE_CODES = {"Delta": "DL", "Southwest": "WN", "JetBlue": "B6", "American": 
 DOMESTIC_BAG_FEE_BY_AIRLINE = {"Southwest": 0.0, "JetBlue": 70.0, "Delta": 70.0, "American": 70.0}
 
 US_AIRPORTS = {
-    "BOS","MHT","JFK","LGA","EWR","PHL","DCA","IAD","BWI","CLT","ATL","MCO","TPA",
-    "MIA","FLL","ORD","MDW","DFW","DAL","IAH","HOU","DEN","PHX","LAS","LAX","SFO","SEA",
-    "HNL","OGG","LIH","KOA"
+    "BOS",
+    "MHT",
+    "JFK",
+    "LGA",
+    "EWR",
+    "PHL",
+    "DCA",
+    "IAD",
+    "BWI",
+    "CLT",
+    "ATL",
+    "MCO",
+    "TPA",
+    "MIA",
+    "FLL",
+    "ORD",
+    "MDW",
+    "DFW",
+    "DAL",
+    "IAH",
+    "HOU",
+    "DEN",
+    "PHX",
+    "LAS",
+    "LAX",
+    "SFO",
+    "SEA",
+    "HNL",
+    "OGG",
+    "LIH",
+    "KOA",
 }
 
 HOTEL_BASE_RATE_BY_AIRPORT = {
-    "BOS": 260.0, "JFK": 280.0, "LGA": 270.0, "EWR": 260.0,
-    "LAX": 260.0, "SFO": 280.0, "SEA": 250.0, "DEN": 210.0,
-    "MCO": 210.0, "TPA": 215.0, "MIA": 260.0, "CLT": 190.0,
-    "PHL": 210.0, "ORD": 230.0, "ATL": 210.0,
+    "BOS": 260.0,
+    "JFK": 280.0,
+    "LGA": 270.0,
+    "EWR": 260.0,
+    "LAX": 260.0,
+    "SFO": 280.0,
+    "SEA": 250.0,
+    "DEN": 210.0,
+    "MCO": 210.0,
+    "TPA": 215.0,
+    "MIA": 260.0,
+    "CLT": 190.0,
+    "PHL": 210.0,
+    "ORD": 230.0,
+    "ATL": 210.0,
 }
 DEFAULT_HOTEL_NIGHTLY_RATE = 190.0
 
 HERTZ_BASE_DAILY_BY_AIRPORT = {
-    "BOS": 70.0, "MHT": 60.0, "JFK": 75.0, "LGA": 75.0, "EWR": 72.0,
-    "TPA": 65.0, "MCO": 65.0, "MIA": 70.0, "DEN": 68.0,
-    "SFO": 78.0, "LAX": 78.0, "SEA": 72.0,
+    "BOS": 70.0,
+    "MHT": 60.0,
+    "JFK": 75.0,
+    "LGA": 75.0,
+    "EWR": 72.0,
+    "TPA": 65.0,
+    "MCO": 65.0,
+    "MIA": 70.0,
+    "DEN": 68.0,
+    "SFO": 78.0,
+    "LAX": 78.0,
+    "SEA": 72.0,
 }
 HERTZ_SUV_UPLIFT = 0.15
 HERTZ_MEMBERSHIP_DISCOUNT = 0.12
@@ -69,7 +117,8 @@ AIRPORT_SHUTTLE_TIPS = 10.0
 HOUSEKEEPING_PER_NIGHT = 10.0  # per night per traveler
 
 # Car service contract rates (BOS = Logan, MHT = Manchester)
-CAR_SERVICE_RATES = {
+# Contract is one-way, so we compute round trip as 2x one-way.
+CAR_SERVICE_RATES_ONE_WAY = {
     "BOS": {  # Logan -> Nashua/Methuen/Lawrence
         "1-3": 161.76,   # Lincoln MKT/Aviator
         "4-5": 229.12,   # SUV
@@ -124,6 +173,34 @@ def us_holidays_for_year(year: int) -> set:
 
 def is_holiday(date_obj: dt.date) -> bool:
     return date_obj in us_holidays_for_year(date_obj.year)
+
+def holiday_name(date_obj: dt.date) -> Optional[str]:
+    y = date_obj.year
+    # fixed
+    if date_obj == dt.date(y, 1, 1):
+        return "New Year's Day"
+    if date_obj == dt.date(y, 6, 19):
+        return "Juneteenth"
+    if date_obj == dt.date(y, 7, 4):
+        return "Independence Day"
+    if date_obj == dt.date(y, 11, 11):
+        return "Veterans Day"
+    if date_obj == dt.date(y, 12, 25):
+        return "Christmas Day"
+    # floating
+    if date_obj == nth_weekday_of_month(y, 1, weekday=0, n=3):
+        return "MLK Day"
+    if date_obj == nth_weekday_of_month(y, 2, weekday=0, n=3):
+        return "Presidents Day"
+    if date_obj == last_weekday_of_month(y, 5, weekday=0):
+        return "Memorial Day"
+    if date_obj == nth_weekday_of_month(y, 9, weekday=0, n=1):
+        return "Labor Day"
+    if date_obj == nth_weekday_of_month(y, 10, weekday=0, n=2):
+        return "Columbus Day"
+    if date_obj == nth_weekday_of_month(y, 11, weekday=3, n=4):
+        return "Thanksgiving"
+    return None
 
 # ---------------------------------------------------------
 # Amadeus + pricing helpers
@@ -223,29 +300,45 @@ def car_service_vehicle_tier(travelers: int) -> Optional[str]:
         return "6-14"
     return None
 
-def estimate_car_service_total(
+def estimate_car_service_round_trip_total(
     departure_airport: str,
     travelers: int,
     include: bool,
     city_choice: Optional[str],
-    pickup_date: dt.date,
-) -> Tuple[float, str, float, float]:
+    dep_date: dt.date,
+    ret_date: dt.date,
+) -> Tuple[float, str, float, float, bool, bool]:
+    """
+    Round trip pricing:
+      - Base is 2x one-way rate (home->airport + airport->home)
+      - Holiday surcharge applies if EITHER leg pickup date is a holiday
+        (departure date pickup OR return date pickup).
+      - Holiday surcharge applied once (not per leg).
+    Returns:
+      (total_cost, tier_label, one_way_rate, holiday_fee, dep_is_holiday, ret_is_holiday)
+    """
     if not include:
-        return 0.0, "n/a", 0.0, 0.0
+        return 0.0, "n/a", 0.0, 0.0, False, False
 
     airport = departure_airport.upper()
     tier = car_service_vehicle_tier(travelers)
     if tier is None:
-        return 0.0, "unsupported", 0.0, 0.0
+        return 0.0, "unsupported", 0.0, 0.0, False, False
 
-    if airport not in CAR_SERVICE_RATES:
-        return 0.0, "unsupported-airport", 0.0, 0.0
+    if airport not in CAR_SERVICE_RATES_ONE_WAY:
+        return 0.0, "unsupported-airport", 0.0, 0.0, False, False
 
-    _ = city_choice  # for audit clarity only
-    base = float(CAR_SERVICE_RATES[airport][tier])
-    holiday_fee = CAR_SERVICE_HOLIDAY_SURCHARGE if is_holiday(pickup_date) else 0.0
-    total = round(base + holiday_fee, 2)
-    return total, tier, base, holiday_fee
+    _ = city_choice  # pricing same for Nashua/Methuen/Lawrence per contract; kept for audit clarity
+
+    one_way = float(CAR_SERVICE_RATES_ONE_WAY[airport][tier])
+    base_round_trip = round(one_way * 2, 2)
+
+    dep_h = is_holiday(dep_date)
+    ret_h = is_holiday(ret_date)
+
+    holiday_fee = CAR_SERVICE_HOLIDAY_SURCHARGE if (dep_h or ret_h) else 0.0
+    total = round(base_round_trip + holiday_fee, 2)
+    return total, tier, one_way, holiday_fee, dep_h, ret_h
 
 # ---------------------------------------------------------
 # Inputs
@@ -348,13 +441,16 @@ rental_total = daily_rental_rate * trip_days if include_rental else 0.0
 housekeeping_total = HOUSEKEEPING_PER_NIGHT * trip_nights * travelers
 fixed_incidentals_total = GAS_COST + TOLLS_COST + PARKING_COST + AIRPORT_SHUTTLE_TIPS + housekeeping_total
 
-# Car service (holiday surcharge auto-applied if dep_date is a holiday)
-car_service_total, car_service_tier, car_service_base, car_service_holiday_fee = estimate_car_service_total(
-    departure_airport=dep_airport,
-    travelers=travelers,
-    include=include_car_service,
-    city_choice=car_service_city,
-    pickup_date=dep_date,
+# Car service (round trip + holiday surcharge if dep_date OR ret_date is holiday)
+car_service_total, car_service_tier, car_service_one_way, car_service_holiday_fee, dep_holiday, ret_holiday = (
+    estimate_car_service_round_trip_total(
+        departure_airport=dep_airport,
+        travelers=travelers,
+        include=include_car_service,
+        city_choice=car_service_city,
+        dep_date=dep_date,
+        ret_date=ret_date,
+    )
 )
 
 if include_car_service and car_service_tier in ("unsupported", "unsupported-airport"):
@@ -435,13 +531,29 @@ with st.expander("Show detailed cost math", expanded=False):
     st.markdown(f"- Housekeeping = `$10 × {trip_nights} × {travelers}` = `${housekeeping_total:,.2f}`")
     st.markdown(f"- Fixed incidentals total = `${fixed_incidentals_total:,.2f}`")
 
-    st.markdown("**Car service**")
+    st.markdown("**Car service (round trip)**")
     if include_car_service:
         st.markdown(f"- Service area = `{car_service_city}`")
         st.markdown(f"- Passenger tier = `{car_service_tier}`")
-        st.markdown(f"- Base rate (from contract) = `${car_service_base:,.2f}`")
-        st.markdown(f"- Holiday surcharge applied? = `{is_holiday(dep_date)}`")
-        st.markdown(f"- Holiday surcharge = `${car_service_holiday_fee:,.2f}`")
+        st.markdown(f"- One-way rate (contract) = `${car_service_one_way:,.2f}`")
+        st.markdown(f"- Round-trip base = `${car_service_one_way:,.2f} × 2` = `${car_service_one_way * 2:,.2f}`")
+
+        # Only show holiday surcharge lines if applied
+        if car_service_holiday_fee > 0:
+            dep_name = holiday_name(dep_date) if dep_holiday else None
+            ret_name = holiday_name(ret_date) if ret_holiday else None
+
+            if dep_name and ret_name:
+                holiday_label = f"{dep_name} (departure) / {ret_name} (return)"
+            elif dep_name:
+                holiday_label = f"{dep_name} (departure)"
+            elif ret_name:
+                holiday_label = f"{ret_name} (return)"
+            else:
+                holiday_label = "Holiday"
+
+            st.markdown(f"- Holiday surcharge ({holiday_label}) = `${car_service_holiday_fee:,.2f}`")
+
         st.markdown(f"- Car service total = `${car_service_total:,.2f}`")
     else:
         st.markdown("- Car service excluded")
