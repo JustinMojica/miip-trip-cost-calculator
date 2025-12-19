@@ -46,8 +46,6 @@ DOMESTIC_BAG_FEE_BY_AIRLINE = {
 DEPARTURE_AIRPORT_OPTIONS = ["BOS", "MHT"]
 
 # Destination/domestic detection set
-# User requested add: BWI, SLC, Dallas, Houston, Austin, FFL, AID, Chicago, DCA, MSY, SDF
-# Interpreting: Dallas->DFW (+ DAL), Houston->IAH (+ HOU), Austin->AUS, Chicago->ORD (+ MDW), FFL->FLL, AID->IAD
 ADDED_AIRPORTS = ["BWI", "SLC", "DFW", "DAL", "IAH", "HOU", "AUS", "FLL", "IAD", "ORD", "MDW", "DCA", "MSY", "SDF"]
 
 US_AIRPORTS = set(
@@ -416,7 +414,7 @@ with dates_col:
         key="ret_date",
     )
 
-# FIX: Put "Other fixed costs" in a column so it matches normal width (not full page width)
+# Other fixed costs (normal width)
 fixed_row_left, fixed_row_right = st.columns(2)
 with fixed_row_left:
     other_fixed = st.number_input(
@@ -428,10 +426,10 @@ with fixed_row_left:
         key="other_fixed",
     )
 with fixed_row_right:
-    st.write("")  # keeps layout aligned; intentionally blank
+    st.write("")
 
 # =========================================================
-# Validation warnings (no silent failures)
+# Validation warnings
 # =========================================================
 
 warnings: List[str] = []
@@ -630,19 +628,15 @@ with st.expander("Show detailed cost math", expanded=False):
         st.markdown(f"- Outbound tier (group) = `{car_outbound_tier}`")
         st.markdown(f"- Outbound one-way (home → airport) = `${car_outbound_one_way:,.2f}`")
 
+        # Removed: "Return mode = Individual return home" line (per your request)
         if individual_return_home and travelers >= 2:
-            st.markdown("- Return mode = `Individual return home`")
             st.markdown(f"- Return one-way (per traveler, tier 1-3) = `${car_return_one_way:,.2f}`")
             st.markdown(f"- Return total = `${car_return_one_way:,.2f} × {travelers}` = `${car_return_total:,.2f}`")
         else:
-            st.markdown("- Return mode = `Group return`")
             st.markdown(f"- Return one-way (group) = `${car_return_one_way:,.2f}`")
             st.markdown(f"- Return total = `${car_return_total:,.2f}`")
 
-        st.markdown(
-            f"- Base (outbound + return) = `${car_outbound_one_way:,.2f} + ${car_return_total:,.2f}` = "
-            f"`${(car_outbound_one_way + car_return_total):,.2f}`"
-        )
+        # Removed: "Base (outbound + return) = ..." line (per your request)
 
         if car_holiday_fee > 0:
             dep_name = holiday_name(dep_date) if dep_holiday else None
