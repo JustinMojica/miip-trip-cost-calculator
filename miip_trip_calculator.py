@@ -42,10 +42,10 @@ DOMESTIC_BAG_FEE_BY_AIRLINE = {
     "American": 70.0,
 }
 
-# Departure airport: ONLY BOS / MHT (per your request)
+# Departure airport: ONLY BOS / MHT
 DEPARTURE_AIRPORT_OPTIONS = ["BOS", "MHT"]
 
-# For “domestic route” detection we keep a broad US airport set (destinations can still be many airports)
+# Destination/domestic detection set
 # User requested add: BWI, SLC, Dallas, Houston, Austin, FFL, AID, Chicago, DCA, MSY, SDF
 # Interpreting: Dallas->DFW (+ DAL), Houston->IAH (+ HOU), Austin->AUS, Chicago->ORD (+ MDW), FFL->FLL, AID->IAD
 ADDED_AIRPORTS = ["BWI", "SLC", "DFW", "DAL", "IAH", "HOU", "AUS", "FLL", "IAD", "ORD", "MDW", "DCA", "MSY", "SDF"]
@@ -154,7 +154,7 @@ CAR_SERVICE_HOLIDAY_SURCHARGE = 25.00
 CAR_SERVICE_CITIES = ["Nashua, NH", "Methuen, MA", "Lawrence, MA"]
 
 # =========================================================
-# Holiday helpers (true-date US federal holidays + Christmas)
+# Holiday helpers
 # =========================================================
 
 def nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> dt.date:
@@ -179,12 +179,12 @@ def us_holidays_for_year(year: int) -> set:
     veterans = dt.date(year, 11, 11)
     christmas = dt.date(year, 12, 25)
 
-    mlk = nth_weekday_of_month(year, 1, weekday=0, n=3)            # Mon
-    presidents = nth_weekday_of_month(year, 2, weekday=0, n=3)     # Mon
-    memorial = last_weekday_of_month(year, 5, weekday=0)           # Mon
-    labor = nth_weekday_of_month(year, 9, weekday=0, n=1)          # Mon
-    columbus = nth_weekday_of_month(year, 10, weekday=0, n=2)      # Mon
-    thanksgiving = nth_weekday_of_month(year, 11, weekday=3, n=4)  # Thu
+    mlk = nth_weekday_of_month(year, 1, weekday=0, n=3)
+    presidents = nth_weekday_of_month(year, 2, weekday=0, n=3)
+    memorial = last_weekday_of_month(year, 5, weekday=0)
+    labor = nth_weekday_of_month(year, 9, weekday=0, n=1)
+    columbus = nth_weekday_of_month(year, 10, weekday=0, n=2)
+    thanksgiving = nth_weekday_of_month(year, 11, weekday=3, n=4)
 
     return {
         new_years, mlk, presidents, memorial, juneteenth, independence,
@@ -329,16 +329,6 @@ def estimate_car_service_total(
     ret_date: dt.date,
     individual_return_home: bool,
 ) -> Tuple[float, str, float, float, float, bool, bool, str]:
-    """
-    - Contract rates are one-way.
-    - Outbound leg (home -> airport): group tier based on travelers.
-    - Return leg (airport -> home):
-        * If individual_return_home=True and travelers>=2:
-            return_total = (1-3 one-way rate) * travelers
-        * Else:
-            return_total = one-way group rate (same tier as outbound)
-    - Holiday surcharge applies once if dep_date OR ret_date is holiday.
-    """
     if not include:
         return 0.0, "n/a", 0.0, 0.0, 0.0, False, False, "n/a"
 
@@ -346,7 +336,7 @@ def estimate_car_service_total(
     if airport not in CAR_SERVICE_RATES_ONE_WAY:
         return 0.0, "unsupported-airport", 0.0, 0.0, 0.0, False, False, "n/a"
 
-    _ = city_choice  # retained for clarity in display; same pricing for these cities
+    _ = city_choice
 
     outbound_tier = car_service_vehicle_tier(travelers)
     if outbound_tier is None:
@@ -373,7 +363,7 @@ def estimate_car_service_total(
     return total, outbound_tier, outbound_one_way, return_one_way, return_total, dep_h, ret_h, return_tier
 
 # =========================================================
-# Inputs (layout updated to close the gap)
+# Inputs
 # =========================================================
 
 left, right = st.columns(2)
@@ -400,23 +390,19 @@ with right:
     st.markdown('<div class="miip-section-title">Client & hotel options</div>', unsafe_allow_html=True)
     hotel_brand = st.selectbox("Preferred hotel brand", ["Marriott", "Hilton", "Wyndham"], key="hotel_brand")
 
-    # Move Ground costs HERE to eliminate the big vertical gap
     st.markdown('<div class="miip-section-title" style="margin-top: 1.0rem;">Ground costs</div>', unsafe_allow_html=True)
 
     include_rental = st.checkbox("Include Hertz rental SUV", value=True, key="include_rental")
-
     include_car_service = st.checkbox("Include car service", value=False, key="include_car_service")
 
     individual_return_home = False
     car_service_city = None
-
     if include_car_service:
         if travelers >= 2:
             individual_return_home = st.checkbox("Individual return home", value=False, key="individual_return_home")
         car_service_city = st.selectbox("Car service area", CAR_SERVICE_CITIES, key="car_service_city")
 
-# Dates row (kept separate, but now Ground costs isn't pushed down)
-dates_col, _spacer = st.columns(2)
+dates_col, _ = st.columns(2)
 today = dt.date.today()
 
 with dates_col:
@@ -430,15 +416,19 @@ with dates_col:
         key="ret_date",
     )
 
-# Other fixed costs — stays directly above Flights radios (as you wanted)
-other_fixed = st.number_input(
-    "Other fixed costs",
-    min_value=0.0,
-    value=0.0,
-    step=50.0,
-    help="USD",
-    key="other_fixed",
-)
+# FIX: Put "Other fixed costs" in a column so it matches normal width (not full page width)
+fixed_row_left, fixed_row_right = st.columns(2)
+with fixed_row_left:
+    other_fixed = st.number_input(
+        "Other fixed costs",
+        min_value=0.0,
+        value=0.0,
+        step=50.0,
+        help="USD",
+        key="other_fixed",
+    )
+with fixed_row_right:
+    st.write("")  # keeps layout aligned; intentionally blank
 
 # =========================================================
 # Validation warnings (no silent failures)
@@ -456,9 +446,6 @@ if destination_airport and len(destination_airport) == 3:
         warnings.append("No Hertz rate mapping for this destination airport. A default rental estimate will be used.")
 
 if include_car_service:
-    # This should never happen now (since departure is only BOS/MHT), but keep it safe:
-    if departure_airport.upper() not in CAR_SERVICE_RATES_ONE_WAY:
-        warnings.append("Car service pricing is only available for BOS or MHT (per contract). Car service will be excluded.")
     if travelers > 14:
         warnings.append("Car service supports up to 14 passengers. Car service will be excluded.")
     if individual_return_home and travelers < 2:
@@ -468,7 +455,7 @@ for w in warnings:
     st.warning(w)
 
 # =========================================================
-# Flights (Amadeus auto + manual)
+# Flights
 # =========================================================
 
 st.markdown('<div class="miip-section-title">Flights</div>', unsafe_allow_html=True)
@@ -517,7 +504,6 @@ trip_nights = max(trip_days - 1, 0)
 
 flights_total = flight_pp * travelers
 
-# Checked bags: only for domestic routes; 1 checked bag per traveler round trip
 bag_fee_per_traveler = 0.0
 if len(destination_airport) == 3 and is_domestic(departure_airport, destination_airport):
     bag_fee_per_traveler = DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70.0)
@@ -598,7 +584,7 @@ st.write(f"- Other fixed costs: **${other_fixed:,.0f}**")
 st.success(f"Grand total: ${grand_total:,.0f}")
 
 # =========================================================
-# Geek math (full breakdown)
+# Geek math
 # =========================================================
 
 with st.expander("Show detailed cost math", expanded=False):
