@@ -42,55 +42,26 @@ DOMESTIC_BAG_FEE_BY_AIRLINE = {
     "American": 70.0,
 }
 
-# User requested to add these to "all lists" and adjust costs:
-# BWI, SLC, Dallas, Houston, Austin, FFL, AID, Chicago, DCA, MSY, SDF
-#
-# Interpreting city names/typos as common IATA:
-# Dallas -> DFW (also keep DAL)
-# Houston -> IAH (also keep HOU)
-# Austin -> AUS
-# Chicago -> ORD (also keep MDW)
-# FFL -> FLL (Fort Lauderdale)
-# AID -> IAD (Dulles)
+# Departure airport: ONLY BOS / MHT (per your request)
+DEPARTURE_AIRPORT_OPTIONS = ["BOS", "MHT"]
+
+# For “domestic route” detection we keep a broad US airport set (destinations can still be many airports)
+# User requested add: BWI, SLC, Dallas, Houston, Austin, FFL, AID, Chicago, DCA, MSY, SDF
+# Interpreting: Dallas->DFW (+ DAL), Houston->IAH (+ HOU), Austin->AUS, Chicago->ORD (+ MDW), FFL->FLL, AID->IAD
 ADDED_AIRPORTS = ["BWI", "SLC", "DFW", "DAL", "IAH", "HOU", "AUS", "FLL", "IAD", "ORD", "MDW", "DCA", "MSY", "SDF"]
 
-# Departure airport options (selectbox) — includes your original + requested + common ones you already used
-AIRPORT_OPTIONS = sorted(
-    set(
-        [
-            "BOS",
-            "MHT",
-            "JFK",
-            "LGA",
-            "EWR",
-            "PHL",
-            "CLT",
-            "ATL",
-            "MCO",
-            "TPA",
-            "MIA",
-            "DEN",
-            "PHX",
-            "LAS",
-            "LAX",
-            "SFO",
-            "SEA",
-            # Added
-            *ADDED_AIRPORTS,
-            # Hawaii common set you had earlier
-            "HNL",
-            "OGG",
-            "LIH",
-            "KOA",
-        ]
-    )
+US_AIRPORTS = set(
+    [
+        "BOS", "MHT",
+        "JFK", "LGA", "EWR", "PHL", "CLT", "ATL",
+        "MCO", "TPA", "MIA", "DEN", "PHX", "LAS", "LAX", "SFO", "SEA",
+        "HNL", "OGG", "LIH", "KOA",
+        *ADDED_AIRPORTS,
+    ]
 )
-
-US_AIRPORTS = set(AIRPORT_OPTIONS)
 
 # Hotel nightly estimates
 HOTEL_BASE_RATE_BY_AIRPORT = {
-    # Existing / common
     "BOS": 260.0,
     "MHT": 190.0,
     "JFK": 280.0,
@@ -122,7 +93,6 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
     "SEA": 250.0,
     "MSY": 200.0,
     "SDF": 175.0,
-    # Hawaii
     "HNL": 320.0,
     "OGG": 300.0,
     "LIH": 290.0,
@@ -130,7 +100,7 @@ HOTEL_BASE_RATE_BY_AIRPORT = {
 }
 DEFAULT_HOTEL_NIGHTLY_RATE = 190.0
 
-# Hertz base daily estimates (before SUV uplift + membership discount)
+# Hertz base daily estimates
 HERTZ_BASE_DAILY_BY_AIRPORT = {
     "BOS": 70.0,
     "MHT": 60.0,
@@ -145,7 +115,6 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
     "SFO": 78.0,
     "LAX": 78.0,
     "SEA": 72.0,
-    # Added/adjusted
     "BWI": 62.0,
     "SLC": 64.0,
     "DFW": 60.0,
@@ -210,11 +179,11 @@ def us_holidays_for_year(year: int) -> set:
     veterans = dt.date(year, 11, 11)
     christmas = dt.date(year, 12, 25)
 
-    mlk = nth_weekday_of_month(year, 1, weekday=0, n=3)          # Mon
-    presidents = nth_weekday_of_month(year, 2, weekday=0, n=3)   # Mon
-    memorial = last_weekday_of_month(year, 5, weekday=0)         # Mon
-    labor = nth_weekday_of_month(year, 9, weekday=0, n=1)        # Mon
-    columbus = nth_weekday_of_month(year, 10, weekday=0, n=2)    # Mon
+    mlk = nth_weekday_of_month(year, 1, weekday=0, n=3)            # Mon
+    presidents = nth_weekday_of_month(year, 2, weekday=0, n=3)     # Mon
+    memorial = last_weekday_of_month(year, 5, weekday=0)           # Mon
+    labor = nth_weekday_of_month(year, 9, weekday=0, n=1)          # Mon
+    columbus = nth_weekday_of_month(year, 10, weekday=0, n=2)      # Mon
     thanksgiving = nth_weekday_of_month(year, 11, weekday=3, n=4)  # Thu
 
     return {
@@ -404,7 +373,7 @@ def estimate_car_service_total(
     return total, outbound_tier, outbound_one_way, return_one_way, return_total, dep_h, ret_h, return_tier
 
 # =========================================================
-# Inputs (UI layout changes applied)
+# Inputs (layout updated to close the gap)
 # =========================================================
 
 left, right = st.columns(2)
@@ -418,49 +387,58 @@ with left:
         value=1,
         step=1,
         help="One room per traveler",
+        key="travelers",
     )
 
-    # MOVED HERE (requested): directly under # travelers
-    assignment_city = st.text_input("Assignment city and state", help="City, State")
+    assignment_city = st.text_input("Assignment city and state", help="City, State", key="assignment_city")
 
-    departure_airport = st.selectbox("Departure airport", AIRPORT_OPTIONS)
-    preferred_airline = st.selectbox("Preferred airline", list(AIRLINE_CODES.keys()))
-    destination_airport = st.text_input("Destination airport", help="3-letter IATA code").strip().upper()
+    departure_airport = st.selectbox("Departure airport", DEPARTURE_AIRPORT_OPTIONS, key="departure_airport")
+    preferred_airline = st.selectbox("Preferred airline", list(AIRLINE_CODES.keys()), key="preferred_airline")
+    destination_airport = st.text_input("Destination airport", help="3-letter IATA code", key="destination_airport").strip().upper()
 
 with right:
     st.markdown('<div class="miip-section-title">Client & hotel options</div>', unsafe_allow_html=True)
-    hotel_brand = st.selectbox("Preferred hotel brand", ["Marriott", "Hilton", "Wyndham"])
+    hotel_brand = st.selectbox("Preferred hotel brand", ["Marriott", "Hilton", "Wyndham"], key="hotel_brand")
 
-dates_col, ground_col = st.columns(2)
+    # Move Ground costs HERE to eliminate the big vertical gap
+    st.markdown('<div class="miip-section-title" style="margin-top: 1.0rem;">Ground costs</div>', unsafe_allow_html=True)
+
+    include_rental = st.checkbox("Include Hertz rental SUV", value=True, key="include_rental")
+
+    include_car_service = st.checkbox("Include car service", value=False, key="include_car_service")
+
+    individual_return_home = False
+    car_service_city = None
+
+    if include_car_service:
+        if travelers >= 2:
+            individual_return_home = st.checkbox("Individual return home", value=False, key="individual_return_home")
+        car_service_city = st.selectbox("Car service area", CAR_SERVICE_CITIES, key="car_service_city")
+
+# Dates row (kept separate, but now Ground costs isn't pushed down)
+dates_col, _spacer = st.columns(2)
 today = dt.date.today()
 
 with dates_col:
     st.markdown('<div class="miip-section-title">Dates</div>', unsafe_allow_html=True)
-    dep_date = st.date_input("Departure date", today, format="MM/DD/YYYY")
+    dep_date = st.date_input("Departure date", today, format="MM/DD/YYYY", key="dep_date")
     ret_date = st.date_input(
         "Return date",
         dep_date + dt.timedelta(days=1),
         min_value=dep_date + dt.timedelta(days=1),
         format="MM/DD/YYYY",
+        key="ret_date",
     )
 
-with ground_col:
-    st.markdown('<div class="miip-section-title">Ground costs</div>', unsafe_allow_html=True)
-
-    include_rental = st.checkbox("Include Hertz rental SUV", value=True)
-
-    include_car_service = st.checkbox("Include car service", value=False)
-
-    # ORDER FIXED (requested): checkbox directly under include_car_service
-    individual_return_home = False
-    car_service_city = None
-    if include_car_service:
-        if travelers >= 2:
-            individual_return_home = st.checkbox("Individual return home", value=False)
-        car_service_city = st.selectbox("Car service area", CAR_SERVICE_CITIES)
-
-# MOVED HERE (requested): Other fixed costs under all boxes ABOVE flights radios
-other_fixed = st.number_input("Other fixed costs", min_value=0.0, value=0.0, step=50.0)
+# Other fixed costs — stays directly above Flights radios (as you wanted)
+other_fixed = st.number_input(
+    "Other fixed costs",
+    min_value=0.0,
+    value=0.0,
+    step=50.0,
+    help="USD",
+    key="other_fixed",
+)
 
 # =========================================================
 # Validation warnings (no silent failures)
@@ -468,29 +446,24 @@ other_fixed = st.number_input("Other fixed costs", min_value=0.0, value=0.0, ste
 
 warnings: List[str] = []
 
-# Destination airport validation
 if destination_airport and len(destination_airport) != 3:
     warnings.append("Destination airport should be a 3-letter IATA code (e.g., TPA). Default estimates may be used.")
 
-# Hotel/rental mapping warnings
 if destination_airport and len(destination_airport) == 3:
     if destination_airport.upper() not in HOTEL_BASE_RATE_BY_AIRPORT:
         warnings.append("No hotel rate mapping for this destination airport. A default nightly hotel estimate will be used.")
     if include_rental and destination_airport.upper() not in HERTZ_BASE_DAILY_BY_AIRPORT:
         warnings.append("No Hertz rate mapping for this destination airport. A default rental estimate will be used.")
 
-# Car service validations
 if include_car_service:
+    # This should never happen now (since departure is only BOS/MHT), but keep it safe:
     if departure_airport.upper() not in CAR_SERVICE_RATES_ONE_WAY:
         warnings.append("Car service pricing is only available for BOS or MHT (per contract). Car service will be excluded.")
     if travelers > 14:
         warnings.append("Car service supports up to 14 passengers. Car service will be excluded.")
     if individual_return_home and travelers < 2:
         warnings.append("Individual return home only applies when there are 2 or more travelers. This option will be ignored.")
-    if individual_return_home and departure_airport.upper() not in CAR_SERVICE_RATES_ONE_WAY:
-        warnings.append("Individual return home requires BOS or MHT car service pricing. This option will be ignored.")
 
-# Show warnings
 for w in warnings:
     st.warning(w)
 
@@ -499,12 +472,12 @@ for w in warnings:
 # =========================================================
 
 st.markdown('<div class="miip-section-title">Flights</div>', unsafe_allow_html=True)
-flight_mode = st.radio("", ["Auto calculate", "Enter manually"])
+flight_mode = st.radio("", ["Auto calculate", "Enter manually"], key="flight_mode")
 
 flight_pp = 0.0
 
 if flight_mode == "Enter manually":
-    flight_pp = st.number_input("Manual flight cost per traveler", min_value=0.0, value=0.0, step=50.0)
+    flight_pp = st.number_input("Manual flight cost per traveler", min_value=0.0, value=0.0, step=50.0, key="manual_flight_pp")
 else:
     if len(destination_airport) != 3:
         st.warning("Enter a valid 3-letter destination airport code to auto-calculate flights.")
@@ -550,28 +523,22 @@ if len(destination_airport) == 3 and is_domestic(departure_airport, destination_
     bag_fee_per_traveler = DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70.0)
 bags_total = bag_fee_per_traveler * travelers
 
-# Hotel
 nightly_hotel_rate = hotel_rate(destination_airport) if len(destination_airport) == 3 else DEFAULT_HOTEL_NIGHTLY_RATE
 hotel_total = nightly_hotel_rate * trip_nights * travelers
 
-# Meals (fixed)
 meals_total = MEALS_PER_DAY * trip_days * travelers
 
-# Hertz
 daily_rental_rate = 0.0
 if include_rental:
     if len(destination_airport) == 3:
         daily_rental_rate = hertz_rate(destination_airport)
     else:
-        # fallback to departure airport mapping if dest isn't usable
         daily_rental_rate = hertz_rate(departure_airport)
 rental_total = daily_rental_rate * trip_days if include_rental else 0.0
 
-# Fixed incidentals
 housekeeping_total = HOUSEKEEPING_PER_NIGHT * trip_nights * travelers
 fixed_incidentals_total = GAS_COST + TOLLS_COST + PARKING_COST + AIRPORT_SHUTTLE_TIPS + housekeeping_total
 
-# Car service
 (
     car_service_total,
     car_outbound_tier,
@@ -591,7 +558,6 @@ fixed_incidentals_total = GAS_COST + TOLLS_COST + PARKING_COST + AIRPORT_SHUTTLE
     individual_return_home=individual_return_home,
 )
 
-# Force exclusion if unsupported (warnings already shown)
 if include_car_service and car_outbound_tier in ("unsupported-airport", "unsupported"):
     car_service_total = 0.0
 
@@ -625,10 +591,7 @@ st.write(f"- Rental car total: **${rental_total:,.0f}**")
 st.write(f"- Fixed incidentals total: **${fixed_incidentals_total:,.0f}**")
 
 if include_car_service:
-    if departure_airport.upper() in CAR_SERVICE_RATES_ONE_WAY and travelers <= 14:
-        st.write(f"- Car service total: **${car_service_total:,.0f}**")
-    else:
-        st.write("- Car service total: **$0**")
+    st.write(f"- Car service total: **${car_service_total:,.0f}**")
 
 st.write(f"- Other fixed costs: **${other_fixed:,.0f}**")
 
@@ -676,7 +639,7 @@ with st.expander("Show detailed cost math", expanded=False):
     st.markdown(f"- Fixed incidentals total = `${fixed_incidentals_total:,.2f}`")
 
     st.markdown("**Car service (home ↔ airport)**")
-    if include_car_service and departure_airport.upper() in CAR_SERVICE_RATES_ONE_WAY and travelers <= 14:
+    if include_car_service:
         st.markdown(f"- Service area = `{car_service_city}`")
         st.markdown(f"- Outbound tier (group) = `{car_outbound_tier}`")
         st.markdown(f"- Outbound one-way (home → airport) = `${car_outbound_one_way:,.2f}`")
@@ -695,7 +658,6 @@ with st.expander("Show detailed cost math", expanded=False):
             f"`${(car_outbound_one_way + car_return_total):,.2f}`"
         )
 
-        # Only show surcharge if applied
         if car_holiday_fee > 0:
             dep_name = holiday_name(dep_date) if dep_holiday else None
             ret_name = holiday_name(ret_date) if ret_holiday else None
