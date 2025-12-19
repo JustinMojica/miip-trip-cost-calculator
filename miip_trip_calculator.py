@@ -6,7 +6,7 @@ import streamlit as st
 from amadeus import Client, ResponseError
 
 # =========================================================
-# Page setup
+# Page config & styling
 # =========================================================
 
 st.set_page_config(page_title="Expense Calculator", layout="wide")
@@ -42,49 +42,120 @@ DOMESTIC_BAG_FEE_BY_AIRLINE = {
     "American": 70.0,
 }
 
-# Expanded airport list (IATA)
-# Requested: BWI, SLC, Dallas, Houston, Austin, FFL, AID, Chicago, DCA, MSY, SDF
-# Interpreting: Dallas->DFW, Houston->IAH, Austin->AUS, Chicago->ORD, FFL->FLL, AID->IAD
-AIRPORT_OPTIONS = [
-    "BOS", "MHT", "BWI", "SLC", "DFW", "IAH", "AUS", "FLL", "IAD", "ORD", "DCA", "MSY", "SDF",
-    "JFK", "LGA", "EWR", "PHL", "CLT", "ATL", "MCO", "TPA", "MIA", "DEN", "PHX", "LAS", "LAX", "SFO", "SEA"
-]
+# User requested to add these to "all lists" and adjust costs:
+# BWI, SLC, Dallas, Houston, Austin, FFL, AID, Chicago, DCA, MSY, SDF
+#
+# Interpreting city names/typos as common IATA:
+# Dallas -> DFW (also keep DAL)
+# Houston -> IAH (also keep HOU)
+# Austin -> AUS
+# Chicago -> ORD (also keep MDW)
+# FFL -> FLL (Fort Lauderdale)
+# AID -> IAD (Dulles)
+ADDED_AIRPORTS = ["BWI", "SLC", "DFW", "DAL", "IAH", "HOU", "AUS", "FLL", "IAD", "ORD", "MDW", "DCA", "MSY", "SDF"]
+
+# Departure airport options (selectbox) — includes your original + requested + common ones you already used
+AIRPORT_OPTIONS = sorted(
+    set(
+        [
+            "BOS",
+            "MHT",
+            "JFK",
+            "LGA",
+            "EWR",
+            "PHL",
+            "CLT",
+            "ATL",
+            "MCO",
+            "TPA",
+            "MIA",
+            "DEN",
+            "PHX",
+            "LAS",
+            "LAX",
+            "SFO",
+            "SEA",
+            # Added
+            *ADDED_AIRPORTS,
+            # Hawaii common set you had earlier
+            "HNL",
+            "OGG",
+            "LIH",
+            "KOA",
+        ]
+    )
+)
 
 US_AIRPORTS = set(AIRPORT_OPTIONS)
 
+# Hotel nightly estimates
 HOTEL_BASE_RATE_BY_AIRPORT = {
-    "BOS": 260.0, "MHT": 190.0,
-    "JFK": 280.0, "LGA": 270.0, "EWR": 260.0,
-    "PHL": 210.0, "CLT": 190.0, "ATL": 210.0,
-    "MCO": 210.0, "TPA": 215.0, "MIA": 260.0, "FLL": 230.0,
-    "DEN": 210.0, "PHX": 200.0, "LAS": 220.0, "LAX": 260.0, "SFO": 280.0, "SEA": 250.0,
-    # Added/adjusted per request
-    "BWI": 195.0,
-    "SLC": 200.0,
-    "DFW": 195.0,  # Dallas
-    "IAH": 190.0,  # Houston
-    "AUS": 210.0,  # Austin
-    "IAD": 210.0,  # (user typed AID)
-    "ORD": 230.0,  # Chicago
+    # Existing / common
+    "BOS": 260.0,
+    "MHT": 190.0,
+    "JFK": 280.0,
+    "LGA": 270.0,
+    "EWR": 260.0,
+    "PHL": 210.0,
     "DCA": 240.0,
-    "MSY": 200.0,  # New Orleans
-    "SDF": 175.0,  # Louisville
+    "IAD": 210.0,
+    "BWI": 195.0,
+    "CLT": 190.0,
+    "ATL": 210.0,
+    "MCO": 210.0,
+    "TPA": 215.0,
+    "MIA": 260.0,
+    "FLL": 230.0,
+    "ORD": 230.0,
+    "MDW": 220.0,
+    "DFW": 195.0,
+    "DAL": 195.0,
+    "IAH": 190.0,
+    "HOU": 190.0,
+    "AUS": 210.0,
+    "DEN": 210.0,
+    "SLC": 200.0,
+    "PHX": 200.0,
+    "LAS": 220.0,
+    "LAX": 260.0,
+    "SFO": 280.0,
+    "SEA": 250.0,
+    "MSY": 200.0,
+    "SDF": 175.0,
+    # Hawaii
+    "HNL": 320.0,
+    "OGG": 300.0,
+    "LIH": 290.0,
+    "KOA": 280.0,
 }
 DEFAULT_HOTEL_NIGHTLY_RATE = 190.0
 
+# Hertz base daily estimates (before SUV uplift + membership discount)
 HERTZ_BASE_DAILY_BY_AIRPORT = {
-    "BOS": 70.0, "MHT": 60.0,
-    "JFK": 75.0, "LGA": 75.0, "EWR": 72.0,
-    "TPA": 65.0, "MCO": 65.0, "MIA": 70.0, "FLL": 66.0,
-    "DEN": 68.0, "SFO": 78.0, "LAX": 78.0, "SEA": 72.0,
-    # Added/adjusted per request
+    "BOS": 70.0,
+    "MHT": 60.0,
+    "JFK": 75.0,
+    "LGA": 75.0,
+    "EWR": 72.0,
+    "TPA": 65.0,
+    "MCO": 65.0,
+    "MIA": 70.0,
+    "FLL": 66.0,
+    "DEN": 68.0,
+    "SFO": 78.0,
+    "LAX": 78.0,
+    "SEA": 72.0,
+    # Added/adjusted
     "BWI": 62.0,
     "SLC": 64.0,
     "DFW": 60.0,
+    "DAL": 60.0,
     "IAH": 60.0,
+    "HOU": 60.0,
     "AUS": 62.0,
     "IAD": 64.0,
     "ORD": 65.0,
+    "MDW": 62.0,
     "DCA": 66.0,
     "MSY": 60.0,
     "SDF": 55.0,
@@ -92,17 +163,20 @@ HERTZ_BASE_DAILY_BY_AIRPORT = {
 HERTZ_SUV_UPLIFT = 0.15
 HERTZ_MEMBERSHIP_DISCOUNT = 0.12
 
+# Meals: fixed rule requested
 MEALS_PER_DAY = 100.0
+
+# Contingency requested
 CONTINGENCY_RATE = 0.075  # 7.5%
 
-# Fixed incidentals (always included)
+# Fixed incidentals requested (always included)
 GAS_COST = 60.0
 TOLLS_COST = 35.0
 PARKING_COST = 50.0
 AIRPORT_SHUTTLE_TIPS = 10.0
 HOUSEKEEPING_PER_NIGHT = 10.0  # per night per traveler
 
-# Car service contract rates (ONE-WAY)
+# Car service contract (one-way) — only BOS/MHT
 CAR_SERVICE_RATES_ONE_WAY = {
     "BOS": {"1-3": 161.76, "4-5": 229.12, "6-14": 295.00},
     "MHT": {"1-3": 97.19, "4-5": 184.76, "6-14": 228.54},
@@ -111,21 +185,74 @@ CAR_SERVICE_HOLIDAY_SURCHARGE = 25.00
 CAR_SERVICE_CITIES = ["Nashua, NH", "Methuen, MA", "Lawrence, MA"]
 
 # =========================================================
-# Holidays (simple, direct-date; extend later if you want)
+# Holiday helpers (true-date US federal holidays + Christmas)
 # =========================================================
 
+def nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> dt.date:
+    first = dt.date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    day = 1 + offset + 7 * (n - 1)
+    return dt.date(year, month, day)
+
+def last_weekday_of_month(year: int, month: int, weekday: int) -> dt.date:
+    if month == 12:
+        next_month = dt.date(year + 1, 1, 1)
+    else:
+        next_month = dt.date(year, month + 1, 1)
+    last_day = next_month - dt.timedelta(days=1)
+    offset = (last_day.weekday() - weekday) % 7
+    return last_day - dt.timedelta(days=offset)
+
+def us_holidays_for_year(year: int) -> set:
+    new_years = dt.date(year, 1, 1)
+    juneteenth = dt.date(year, 6, 19)
+    independence = dt.date(year, 7, 4)
+    veterans = dt.date(year, 11, 11)
+    christmas = dt.date(year, 12, 25)
+
+    mlk = nth_weekday_of_month(year, 1, weekday=0, n=3)          # Mon
+    presidents = nth_weekday_of_month(year, 2, weekday=0, n=3)   # Mon
+    memorial = last_weekday_of_month(year, 5, weekday=0)         # Mon
+    labor = nth_weekday_of_month(year, 9, weekday=0, n=1)        # Mon
+    columbus = nth_weekday_of_month(year, 10, weekday=0, n=2)    # Mon
+    thanksgiving = nth_weekday_of_month(year, 11, weekday=3, n=4)  # Thu
+
+    return {
+        new_years, mlk, presidents, memorial, juneteenth, independence,
+        labor, columbus, veterans, thanksgiving, christmas
+    }
+
 def is_holiday(date_obj: dt.date) -> bool:
-    # You asked for: if pickup date falls on a holiday (example 12/25)
-    # Implementing true-date holidays minimally: Christmas.
-    return date_obj.month == 12 and date_obj.day == 25
+    return date_obj in us_holidays_for_year(date_obj.year)
 
 def holiday_name(date_obj: dt.date) -> Optional[str]:
-    if date_obj.month == 12 and date_obj.day == 25:
+    y = date_obj.year
+    if date_obj == dt.date(y, 1, 1):
+        return "New Year's Day"
+    if date_obj == dt.date(y, 6, 19):
+        return "Juneteenth"
+    if date_obj == dt.date(y, 7, 4):
+        return "Independence Day"
+    if date_obj == dt.date(y, 11, 11):
+        return "Veterans Day"
+    if date_obj == dt.date(y, 12, 25):
         return "Christmas Day"
+    if date_obj == nth_weekday_of_month(y, 1, weekday=0, n=3):
+        return "MLK Day"
+    if date_obj == nth_weekday_of_month(y, 2, weekday=0, n=3):
+        return "Presidents Day"
+    if date_obj == last_weekday_of_month(y, 5, weekday=0):
+        return "Memorial Day"
+    if date_obj == nth_weekday_of_month(y, 9, weekday=0, n=1):
+        return "Labor Day"
+    if date_obj == nth_weekday_of_month(y, 10, weekday=0, n=2):
+        return "Columbus Day"
+    if date_obj == nth_weekday_of_month(y, 11, weekday=3, n=4):
+        return "Thanksgiving"
     return None
 
 # =========================================================
-# Helpers
+# Amadeus + pricing helpers
 # =========================================================
 
 def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
@@ -141,7 +268,8 @@ def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
         if not client_id or not client_secret:
             return None, "Amadeus client_id/client_secret missing in Streamlit secrets."
 
-        return Client(client_id=client_id, client_secret=client_secret, hostname=hostname), None
+        client = Client(client_id=client_id, client_secret=client_secret, hostname=hostname)
+        return client, None
     except Exception as exc:
         return None, f"Amadeus init error: {exc}"
 
@@ -210,6 +338,10 @@ def avg_flight_cost(
 
     return None, "none"
 
+# =========================================================
+# Car service helpers
+# =========================================================
+
 def car_service_vehicle_tier(travelers: int) -> Optional[str]:
     if 1 <= travelers <= 3:
         return "1-3"
@@ -230,12 +362,12 @@ def estimate_car_service_total(
 ) -> Tuple[float, str, float, float, float, bool, bool, str]:
     """
     - Contract rates are one-way.
-    - Outbound (home -> airport): group tier based on travelers.
-    - Return (airport -> home):
+    - Outbound leg (home -> airport): group tier based on travelers.
+    - Return leg (airport -> home):
         * If individual_return_home=True and travelers>=2:
             return_total = (1-3 one-way rate) * travelers
         * Else:
-            return_total = one-way group rate
+            return_total = one-way group rate (same tier as outbound)
     - Holiday surcharge applies once if dep_date OR ret_date is holiday.
     """
     if not include:
@@ -245,7 +377,7 @@ def estimate_car_service_total(
     if airport not in CAR_SERVICE_RATES_ONE_WAY:
         return 0.0, "unsupported-airport", 0.0, 0.0, 0.0, False, False, "n/a"
 
-    _ = city_choice  # pricing same for these cities in contract; retained for clarity
+    _ = city_choice  # retained for clarity in display; same pricing for these cities
 
     outbound_tier = car_service_vehicle_tier(travelers)
     if outbound_tier is None:
@@ -272,13 +404,14 @@ def estimate_car_service_total(
     return total, outbound_tier, outbound_one_way, return_one_way, return_total, dep_h, ret_h, return_tier
 
 # =========================================================
-# Inputs
+# Inputs (UI layout changes applied)
 # =========================================================
 
 left, right = st.columns(2)
 
 with left:
     st.markdown('<div class="miip-section-title">Traveler & flights</div>', unsafe_allow_html=True)
+
     travelers = st.number_input(
         "Number of travelers",
         min_value=1,
@@ -287,13 +420,15 @@ with left:
         help="One room per traveler",
     )
 
+    # MOVED HERE (requested): directly under # travelers
+    assignment_city = st.text_input("Assignment city and state", help="City, State")
+
     departure_airport = st.selectbox("Departure airport", AIRPORT_OPTIONS)
     preferred_airline = st.selectbox("Preferred airline", list(AIRLINE_CODES.keys()))
     destination_airport = st.text_input("Destination airport", help="3-letter IATA code").strip().upper()
 
 with right:
     st.markdown('<div class="miip-section-title">Client & hotel options</div>', unsafe_allow_html=True)
-    assignment_city = st.text_input("Assignment city and state", help="City, State")
     hotel_brand = st.selectbox("Preferred hotel brand", ["Marriott", "Hilton", "Wyndham"])
 
 dates_col, ground_col = st.columns(2)
@@ -311,24 +446,24 @@ with dates_col:
 
 with ground_col:
     st.markdown('<div class="miip-section-title">Ground costs</div>', unsafe_allow_html=True)
+
     include_rental = st.checkbox("Include Hertz rental SUV", value=True)
-    other_fixed = st.number_input("Other fixed costs", min_value=0.0, value=0.0, step=50.0)
 
-    st.write("")
-
-    # Car service UI (checkbox order fixed)
     include_car_service = st.checkbox("Include car service", value=False)
 
+    # ORDER FIXED (requested): checkbox directly under include_car_service
     individual_return_home = False
     car_service_city = None
-
     if include_car_service:
         if travelers >= 2:
             individual_return_home = st.checkbox("Individual return home", value=False)
         car_service_city = st.selectbox("Car service area", CAR_SERVICE_CITIES)
 
+# MOVED HERE (requested): Other fixed costs under all boxes ABOVE flights radios
+other_fixed = st.number_input("Other fixed costs", min_value=0.0, value=0.0, step=50.0)
+
 # =========================================================
-# Validation warnings (no more silent failures)
+# Validation warnings (no silent failures)
 # =========================================================
 
 warnings: List[str] = []
@@ -337,38 +472,36 @@ warnings: List[str] = []
 if destination_airport and len(destination_airport) != 3:
     warnings.append("Destination airport should be a 3-letter IATA code (e.g., TPA). Default estimates may be used.")
 
-# Car service validation
+# Hotel/rental mapping warnings
+if destination_airport and len(destination_airport) == 3:
+    if destination_airport.upper() not in HOTEL_BASE_RATE_BY_AIRPORT:
+        warnings.append("No hotel rate mapping for this destination airport. A default nightly hotel estimate will be used.")
+    if include_rental and destination_airport.upper() not in HERTZ_BASE_DAILY_BY_AIRPORT:
+        warnings.append("No Hertz rate mapping for this destination airport. A default rental estimate will be used.")
+
+# Car service validations
 if include_car_service:
     if departure_airport.upper() not in CAR_SERVICE_RATES_ONE_WAY:
         warnings.append("Car service pricing is only available for BOS or MHT (per contract). Car service will be excluded.")
     if travelers > 14:
         warnings.append("Car service supports up to 14 passengers. Car service will be excluded.")
-    if travelers < 2 and individual_return_home:
+    if individual_return_home and travelers < 2:
         warnings.append("Individual return home only applies when there are 2 or more travelers. This option will be ignored.")
-    if individual_return_home and travelers >= 2 and departure_airport.upper() not in CAR_SERVICE_RATES_ONE_WAY:
+    if individual_return_home and departure_airport.upper() not in CAR_SERVICE_RATES_ONE_WAY:
         warnings.append("Individual return home requires BOS or MHT car service pricing. This option will be ignored.")
 
-# Hertz validation
-if include_rental and destination_airport and len(destination_airport) == 3 and destination_airport.upper() not in HERTZ_BASE_DAILY_BY_AIRPORT:
-    warnings.append("No Hertz rate mapping for this destination airport. A default rental estimate will be used.")
-
-# Hotel validation
-if destination_airport and len(destination_airport) == 3 and destination_airport.upper() not in HOTEL_BASE_RATE_BY_AIRPORT:
-    warnings.append("No hotel rate mapping for this destination airport. A default nightly hotel estimate will be used.")
-
-# Show warnings (yellow)
+# Show warnings
 for w in warnings:
     st.warning(w)
 
 # =========================================================
-# Flights section
+# Flights (Amadeus auto + manual)
 # =========================================================
 
 st.markdown('<div class="miip-section-title">Flights</div>', unsafe_allow_html=True)
 flight_mode = st.radio("", ["Auto calculate", "Enter manually"])
 
 flight_pp = 0.0
-flight_note = None  # for messaging
 
 if flight_mode == "Enter manually":
     flight_pp = st.number_input("Manual flight cost per traveler", min_value=0.0, value=0.0, step=50.0)
@@ -394,6 +527,7 @@ else:
                 st.error("Amadeus returned no offers for this route/dates. You can enter flights manually.")
             elif status == "preferred":
                 flight_pp = avg_price
+                st.caption(f"Estimated average round-trip fare per traveler for **{preferred_airline}**: **${flight_pp:,.0f}**.")
             else:
                 flight_pp = avg_price
                 st.warning(
@@ -410,7 +544,7 @@ trip_nights = max(trip_days - 1, 0)
 
 flights_total = flight_pp * travelers
 
-# Bags
+# Checked bags: only for domestic routes; 1 checked bag per traveler round trip
 bag_fee_per_traveler = 0.0
 if len(destination_airport) == 3 and is_domestic(departure_airport, destination_airport):
     bag_fee_per_traveler = DOMESTIC_BAG_FEE_BY_AIRLINE.get(preferred_airline, 70.0)
@@ -420,19 +554,20 @@ bags_total = bag_fee_per_traveler * travelers
 nightly_hotel_rate = hotel_rate(destination_airport) if len(destination_airport) == 3 else DEFAULT_HOTEL_NIGHTLY_RATE
 hotel_total = nightly_hotel_rate * trip_nights * travelers
 
-# Meals (always $100/day per traveler)
+# Meals (fixed)
 meals_total = MEALS_PER_DAY * trip_days * travelers
 
-# Rental
+# Hertz
 daily_rental_rate = 0.0
 if include_rental:
     if len(destination_airport) == 3:
         daily_rental_rate = hertz_rate(destination_airport)
     else:
+        # fallback to departure airport mapping if dest isn't usable
         daily_rental_rate = hertz_rate(departure_airport)
 rental_total = daily_rental_rate * trip_days if include_rental else 0.0
 
-# Fixed incidentals (always)
+# Fixed incidentals
 housekeeping_total = HOUSEKEEPING_PER_NIGHT * trip_nights * travelers
 fixed_incidentals_total = GAS_COST + TOLLS_COST + PARKING_COST + AIRPORT_SHUTTLE_TIPS + housekeeping_total
 
@@ -456,7 +591,7 @@ fixed_incidentals_total = GAS_COST + TOLLS_COST + PARKING_COST + AIRPORT_SHUTTLE
     individual_return_home=individual_return_home,
 )
 
-# If unsupported airport or pax, force it off (and warn already shown)
+# Force exclusion if unsupported (warnings already shown)
 if include_car_service and car_outbound_tier in ("unsupported-airport", "unsupported"):
     car_service_total = 0.0
 
@@ -560,6 +695,7 @@ with st.expander("Show detailed cost math", expanded=False):
             f"`${(car_outbound_one_way + car_return_total):,.2f}`"
         )
 
+        # Only show surcharge if applied
         if car_holiday_fee > 0:
             dep_name = holiday_name(dep_date) if dep_holiday else None
             ret_name = holiday_name(ret_date) if ret_holiday else None
