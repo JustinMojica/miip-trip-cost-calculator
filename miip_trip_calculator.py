@@ -37,41 +37,92 @@ AIRLINE_CODES = {"Delta": "DL", "Southwest": "WN", "JetBlue": "B6", "American": 
 DOMESTIC_BAG_FEE_BY_AIRLINE = {"Southwest": 0.0, "JetBlue": 70.0, "Delta": 70.0, "American": 70.0}
 
 # Expanded airport list (IATA codes)
-# User asked to add: BWI, SLC, Dallas, Houston, Austin, FFL, AID, Chicago, DCA, MSY, SDF
+# User requested: BWI, SLC, Dallas, Houston, Austin, FFL, AID, Chicago, DCA, MSY, SDF
 # Interpreting city names / typos as common IATA:
 # Dallas -> DFW, Houston -> IAH, Austin -> AUS, Chicago -> ORD, FFL -> FLL, AID -> IAD
 US_AIRPORTS = {
-    "BOS","MHT","JFK","LGA","EWR","PHL","DCA","IAD","BWI","CLT","ATL","MCO","TPA",
-    "MIA","FLL","ORD","MDW","DFW","DAL","IAH","HOU","DEN","PHX","LAS","LAX","SFO","SEA",
-    "HNL","OGG","LIH","KOA",
-    "SLC","MSY","SDF","AUS"
+    "BOS",
+    "MHT",
+    "JFK",
+    "LGA",
+    "EWR",
+    "PHL",
+    "DCA",
+    "IAD",
+    "BWI",
+    "CLT",
+    "ATL",
+    "MCO",
+    "TPA",
+    "MIA",
+    "FLL",
+    "ORD",
+    "MDW",
+    "DFW",
+    "DAL",
+    "IAH",
+    "HOU",
+    "DEN",
+    "PHX",
+    "LAS",
+    "LAX",
+    "SFO",
+    "SEA",
+    "SLC",
+    "MSY",
+    "SDF",
+    "AUS",
+    "HNL",
+    "OGG",
+    "LIH",
+    "KOA",
 }
 
 # Hotel estimates (nightly)
 HOTEL_BASE_RATE_BY_AIRPORT = {
-    "BOS": 260.0, "JFK": 280.0, "LGA": 270.0, "EWR": 260.0,
-    "LAX": 260.0, "SFO": 280.0, "SEA": 250.0, "DEN": 210.0,
-    "MCO": 210.0, "TPA": 215.0, "MIA": 260.0, "CLT": 190.0,
-    "PHL": 210.0, "ORD": 230.0, "ATL": 210.0,
+    "BOS": 260.0,
+    "JFK": 280.0,
+    "LGA": 270.0,
+    "EWR": 260.0,
+    "LAX": 260.0,
+    "SFO": 280.0,
+    "SEA": 250.0,
+    "DEN": 210.0,
+    "MCO": 210.0,
+    "TPA": 215.0,
+    "MIA": 260.0,
+    "CLT": 190.0,
+    "PHL": 210.0,
+    "ORD": 230.0,
+    "ATL": 210.0,
     # Added/adjusted per request
     "BWI": 195.0,
     "SLC": 200.0,
-    "DFW": 195.0,   # Dallas
-    "IAH": 190.0,   # Houston
-    "AUS": 210.0,   # Austin
-    "FLL": 230.0,   # Fort Lauderdale
-    "IAD": 210.0,   # (user typed AID)
+    "DFW": 195.0,  # Dallas
+    "IAH": 190.0,  # Houston
+    "AUS": 210.0,  # Austin
+    "FLL": 230.0,  # Fort Lauderdale
+    "IAD": 210.0,  # (user typed AID)
     "DCA": 240.0,
-    "MSY": 200.0,   # New Orleans
-    "SDF": 175.0,   # Louisville
+    "MSY": 200.0,  # New Orleans
+    "SDF": 175.0,  # Louisville
 }
 DEFAULT_HOTEL_NIGHTLY_RATE = 190.0
 
 # Hertz base daily (before SUV uplift + membership discount)
 HERTZ_BASE_DAILY_BY_AIRPORT = {
-    "BOS": 70.0, "MHT": 60.0, "JFK": 75.0, "LGA": 75.0, "EWR": 72.0,
-    "TPA": 65.0, "MCO": 65.0, "MIA": 70.0, "DEN": 68.0,
-    "SFO": 78.0, "LAX": 78.0, "SEA": 72.0,
+    "BOS": 70.0,
+    "MHT": 60.0,
+    "JFK": 75.0,
+    "LGA": 75.0,
+    "EWR": 72.0,
+    "TPA": 65.0,
+    "MCO": 65.0,
+    "MIA": 70.0,
+    "DEN": 68.0,
+    "SFO": 78.0,
+    "LAX": 78.0,
+    "SEA": 72.0,
     # Added/adjusted per request
     "BWI": 62.0,
     "SLC": 64.0,
@@ -101,8 +152,8 @@ HOUSEKEEPING_PER_NIGHT = 10.0  # per night per traveler
 # Contract is one-way.
 CAR_SERVICE_RATES_ONE_WAY = {
     "BOS": {  # Logan -> Nashua/Methuen/Lawrence
-        "1-3": 161.76,   # Lincoln MKT/Aviator
-        "4-5": 229.12,   # SUV
+        "1-3": 161.76,  # Lincoln MKT/Aviator
+        "4-5": 229.12,  # SUV
         "6-14": 295.00,  # Transit
     },
     "MHT": {  # Manchester -> Nashua/Methuen/Lawrence
@@ -118,11 +169,13 @@ CAR_SERVICE_CITIES = ["Nashua, NH", "Methuen, MA", "Lawrence, MA"]
 # Holiday helpers (true-date holidays, not observed)
 # ---------------------------------------------------------
 
+
 def nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> dt.date:
     first = dt.date(year, month, 1)
     offset = (weekday - first.weekday()) % 7
     day = 1 + offset + 7 * (n - 1)
     return dt.date(year, month, day)
+
 
 def last_weekday_of_month(year: int, month: int, weekday: int) -> dt.date:
     if month == 12:
@@ -132,6 +185,7 @@ def last_weekday_of_month(year: int, month: int, weekday: int) -> dt.date:
     last_day = next_month - dt.timedelta(days=1)
     offset = (last_day.weekday() - weekday) % 7
     return last_day - dt.timedelta(days=offset)
+
 
 def us_holidays_for_year(year: int) -> set:
     new_years = dt.date(year, 1, 1)
@@ -148,12 +202,23 @@ def us_holidays_for_year(year: int) -> set:
     thanksgiving = nth_weekday_of_month(year, 11, weekday=3, n=4)
 
     return {
-        new_years, mlk, presidents, memorial, juneteenth, independence,
-        labor, columbus, veterans, thanksgiving, christmas
+        new_years,
+        mlk,
+        presidents,
+        memorial,
+        juneteenth,
+        independence,
+        labor,
+        columbus,
+        veterans,
+        thanksgiving,
+        christmas,
     }
+
 
 def is_holiday(date_obj: dt.date) -> bool:
     return date_obj in us_holidays_for_year(date_obj.year)
+
 
 def holiday_name(date_obj: dt.date) -> Optional[str]:
     y = date_obj.year
@@ -181,9 +246,11 @@ def holiday_name(date_obj: dt.date) -> Optional[str]:
         return "Thanksgiving"
     return None
 
+
 # ---------------------------------------------------------
 # Amadeus + pricing helpers
 # ---------------------------------------------------------
+
 
 def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
     try:
@@ -203,15 +270,19 @@ def try_get_amadeus_client() -> Tuple[Optional[Client], Optional[str]]:
     except Exception as exc:
         return None, f"Amadeus client init error: {exc}"
 
+
 def is_domestic(origin: str, dest: str) -> bool:
     return origin.upper() in US_AIRPORTS and dest.upper() in US_AIRPORTS
+
 
 def hotel_rate(dest: str) -> float:
     return HOTEL_BASE_RATE_BY_AIRPORT.get(dest.upper(), DEFAULT_HOTEL_NIGHTLY_RATE)
 
+
 def hertz_rate(dest: str) -> float:
     base = HERTZ_BASE_DAILY_BY_AIRPORT.get(dest.upper(), 80.0)
     return round(base * (1 + HERTZ_SUV_UPLIFT) * (1 - HERTZ_MEMBERSHIP_DISCOUNT), 2)
+
 
 def avg_flight_cost(
     client: Client,
@@ -268,9 +339,11 @@ def avg_flight_cost(
 
     return None, "none"
 
+
 # ---------------------------------------------------------
 # Car service helpers
 # ---------------------------------------------------------
+
 
 def car_service_vehicle_tier(travelers: int) -> Optional[str]:
     if 1 <= travelers <= 3:
@@ -280,6 +353,7 @@ def car_service_vehicle_tier(travelers: int) -> Optional[str]:
     if 6 <= travelers <= 14:
         return "6-14"
     return None
+
 
 def estimate_car_service_total(
     departure_airport: str,
@@ -292,14 +366,14 @@ def estimate_car_service_total(
 ) -> Tuple[float, str, float, float, float, bool, bool, str]:
     """
     - Base contract is one-way.
-    - Outbound leg (home -> airport):
-        Uses tier based on total travelers (group transport).
+    - Outbound leg (home -> airport) uses group tier based on total travelers.
     - Return leg (airport -> home):
-        If individual_return_home=True, each traveler gets their own service home:
-            return_cost = one_way_rate_for_1_3 * travelers
-        Else group transport back:
-            return_cost = one_way_rate_for_group
-    - Holiday surcharge applies if EITHER dep_date or ret_date is a holiday, applied once.
+        * If individual_return_home=True and travelers>=2:
+            return_total = (one-way 1-3 rate) * travelers
+          (each traveler gets their own service home)
+        * Else:
+            return_total = one-way group rate (same tier as outbound)
+    - Holiday surcharge applies if EITHER dep_date OR ret_date is a holiday, applied once.
     Returns:
       (total, outbound_tier, outbound_one_way, return_one_way, return_total, dep_is_holiday, ret_is_holiday, return_tier)
     """
@@ -310,7 +384,7 @@ def estimate_car_service_total(
     if airport not in CAR_SERVICE_RATES_ONE_WAY:
         return 0.0, "unsupported-airport", 0.0, 0.0, 0.0, False, False, "n/a"
 
-    _ = city_choice  # for audit clarity only
+    _ = city_choice  # pricing same for Nashua/Methuen/Lawrence per contract; kept for audit clarity
 
     outbound_tier = car_service_vehicle_tier(travelers)
     if outbound_tier is None:
@@ -318,13 +392,11 @@ def estimate_car_service_total(
 
     outbound_one_way = float(CAR_SERVICE_RATES_ONE_WAY[airport][outbound_tier])
 
-    if individual_return_home:
-        # each traveler returns solo (assume "1-3" tier per person)
+    if individual_return_home and travelers >= 2:
         return_tier = "1-3"
         return_one_way = float(CAR_SERVICE_RATES_ONE_WAY[airport][return_tier])
         return_total = round(return_one_way * travelers, 2)
     else:
-        # group returns together using same tier as outbound
         return_tier = outbound_tier
         return_one_way = float(CAR_SERVICE_RATES_ONE_WAY[airport][return_tier])
         return_total = round(return_one_way, 2)
@@ -338,6 +410,7 @@ def estimate_car_service_total(
     total = round(base_total + holiday_fee, 2)
     return total, outbound_tier, outbound_one_way, return_one_way, return_total, dep_h, ret_h, return_tier
 
+
 # ---------------------------------------------------------
 # Inputs
 # ---------------------------------------------------------
@@ -348,7 +421,6 @@ with l:
     st.markdown('<div class="miip-section-title">Traveler & flights</div>', unsafe_allow_html=True)
     travelers = st.number_input("Number of travelers", min_value=1, value=1, step=1, help="One room per traveler")
 
-    # Expand departure options, but note: car service contract only supports BOS/MHT
     dep_airport = st.selectbox(
         "Departure airport",
         ["BOS", "MHT", "BWI", "SLC", "DFW", "IAH", "AUS", "FLL", "IAD", "ORD", "DCA", "MSY", "SDF"],
@@ -382,12 +454,17 @@ with g:
 
     st.write("")
 
+    # ---- Car service UI (FIXED): checkbox appears AFTER include car service,
+    # and shows when there are 2 OR MORE travelers (>=2).
     include_car_service = st.checkbox("Include car service", value=False)
+
     car_service_city = None
     individual_return_home = False
 
     if include_car_service:
         car_service_city = st.selectbox("Car service area", CAR_SERVICE_CITIES)
+
+        # This is the checkbox you requested: shown only if travelers >= 2
         if travelers >= 2:
             individual_return_home = st.checkbox("Individual return home", value=False)
 
@@ -413,14 +490,18 @@ else:
         if amadeus_client is None:
             st.warning(f"Auto-calculate unavailable: {amadeus_err} Switch to manual flight entry.")
         else:
-            avg_price, status = avg_flight_cost(amadeus_client, dep_airport, dest_airport, dep_date, ret_date, preferred_airline)
+            avg_price, status = avg_flight_cost(
+                amadeus_client, dep_airport, dest_airport, dep_date, ret_date, preferred_airline
+            )
             if status == "error":
                 st.error("Amadeus flight search failed. You can switch to manual entry.")
             elif status == "none" or avg_price is None:
                 st.error("Amadeus returned no offers for this route/dates. You can enter flights manually.")
             elif status == "preferred":
                 flight_pp = avg_price
-                st.caption(f"Estimated average round-trip fare per traveler for **{preferred_airline}**: **${flight_pp:,.0f}**.")
+                st.caption(
+                    f"Estimated average round-trip fare per traveler for **{preferred_airline}**: **${flight_pp:,.0f}**."
+                )
             else:
                 flight_pp = avg_price
                 st.warning(
@@ -442,7 +523,11 @@ hotel_total = nightly_hotel_rate * trip_nights * travelers
 
 meals_total = MEALS_PER_DAY * trip_days * travelers
 
-daily_rental_rate = hertz_rate(dest_airport) if (include_rental and len(dest_airport) == 3) else (hertz_rate(dep_airport) if include_rental else 0.0)
+daily_rental_rate = (
+    hertz_rate(dest_airport)
+    if (include_rental and len(dest_airport) == 3)
+    else (hertz_rate(dep_airport) if include_rental else 0.0)
+)
 rental_total = daily_rental_rate * trip_days if include_rental else 0.0
 
 # Fixed incidentals
@@ -559,17 +644,20 @@ with st.expander("Show detailed cost math", expanded=False):
         st.markdown(f"- Outbound one-way (home → airport) = `${car_outbound_one_way:,.2f}`")
 
         if individual_return_home and travelers >= 2:
-            st.markdown(f"- Return mode = `Individual return home`")
+            st.markdown("- Return mode = `Individual return home`")
             st.markdown(f"- Return tier (per traveler) = `{car_return_tier}`")
             st.markdown(f"- Return one-way (airport → home, per traveler) = `${car_return_one_way:,.2f}`")
             st.markdown(f"- Return total = `${car_return_one_way:,.2f} × {travelers}` = `${car_return_total:,.2f}`")
         else:
-            st.markdown(f"- Return mode = `Group return`")
+            st.markdown("- Return mode = `Group return`")
             st.markdown(f"- Return tier (group) = `{car_return_tier}`")
             st.markdown(f"- Return one-way (airport → home) = `${car_return_one_way:,.2f}`")
             st.markdown(f"- Return total = `${car_return_total:,.2f}`")
 
-        st.markdown(f"- Base (outbound + return) = `${car_outbound_one_way:,.2f} + ${car_return_total:,.2f}` = `${(car_outbound_one_way + car_return_total):,.2f}`")
+        st.markdown(
+            f"- Base (outbound + return) = `${car_outbound_one_way:,.2f} + ${car_return_total:,.2f}` = "
+            f"`${(car_outbound_one_way + car_return_total):,.2f}`"
+        )
 
         # Only show holiday surcharge if applied
         if car_holiday_fee > 0:
@@ -600,3 +688,5 @@ with st.expander("Show detailed cost math", expanded=False):
     st.markdown(f"- Final total = `${subtotal:,.2f} + ${contingency:,.2f}` = `${grand_total:,.2f}`")
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+
